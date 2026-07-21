@@ -28,6 +28,26 @@ export function dropClient(id: string): void {
   }
 }
 
+const RECONNECTABLE_CODES = new Set(["ERR_POSTGRES_CONNECTION_CLOSED", "ERR_POSTGRES_CONNECTION_TIMEOUT"]);
+const RECONNECTABLE_MESSAGE = /closed|terminat|timed? ?out|reset|broken pipe|ECONNRESET|EPIPE|ETIMEDOUT/i;
+
+function isReconnectable(err: any): boolean {
+  return RECONNECTABLE_CODES.has(err?.code) || RECONNECTABLE_MESSAGE.test(err?.message ?? "");
+}
+
+async function withReconnect<T>(conn: Connection, fn: (client: SQL) => Promise<T>): Promise<T> {
+  const client = clientFor(conn);
+  try {
+    return await fn(client);
+  } catch (err: any) {
+    if (isReconnectable(err)) {
+      dropClient(conn.id);
+      return await fn(clientFor(conn));
+    }
+    throw err;
+  }
+}
+
 export async function testConnection(conn: Connection): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const client = clientFor(conn);
@@ -62,8 +82,7 @@ function toResult(res: any): QueryResult {
 }
 
 export async function runQuery(conn: Connection, text: string): Promise<QueryResult> {
-  const client = clientFor(conn);
-  const res = await client.unsafe(text);
+  const res = await withReconnect(conn, (client) => client.unsafe(text));
   return toResult(res);
 }
 
@@ -74,19 +93,20 @@ export interface TableInfo {
 }
 
 export async function listTables(conn: Connection): Promise<TableInfo[]> {
-  const client = clientFor(conn);
-  const tables = await client`
-    select table_schema as schema, table_name as name
-    from information_schema.tables
-    where table_schema not in ('pg_catalog', 'information_schema')
-    order by table_schema, table_name
-  `;
-  const columns = await client`
-    select table_schema as schema, table_name as name, column_name as col, data_type as type, is_nullable = 'YES' as nullable
-    from information_schema.columns
-    where table_schema not in ('pg_catalog', 'information_schema')
-    order by table_schema, table_name, ordinal_position
-  `;
+  const { tables, columns } = await withReconnect(conn, async (client) => ({
+    tables: await client`
+      select table_schema as schema, table_name as name
+      from information_schema.tables
+      where table_schema not in ('pg_catalog', 'information_schema')
+      order by table_schema, table_name
+    `,
+    columns: await client`
+      select table_schema as schema, table_name as name, column_name as col, data_type as type, is_nullable = 'YES' as nullable
+      from information_schema.columns
+      where table_schema not in ('pg_catalog', 'information_schema')
+      order by table_schema, table_name, ordinal_position
+    `,
+  }));
   return (tables as any[]).map((t) => ({
     schema: t.schema,
     name: t.name,

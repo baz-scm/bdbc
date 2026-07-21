@@ -22,7 +22,9 @@ export const html = /* html */ `<!doctype html>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 13px; }
   #app { display: flex; height: 100vh; }
-  #sidebar { width: 260px; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; }
+  #sidebar { width: 260px; min-width: 160px; max-width: 600px; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; }
+  #sidebar-resizer { width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent; position: relative; }
+  #sidebar-resizer:hover, #sidebar-resizer.dragging { background: var(--accent); }
   #sidebar-header { padding: 10px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
   #sidebar-header h1 { font-size: 13px; margin: 0; font-weight: 600; }
   #conn-list { list-style: none; margin: 0; padding: 4px; flex: 1; overflow-y: auto; }
@@ -34,7 +36,7 @@ export const html = /* html */ `<!doctype html>
   .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   .conn-actions { display: flex; gap: 4px; visibility: hidden; flex-shrink: 0; }
   .conn-row:hover .conn-actions { visibility: visible; }
-  .icon-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px; font-size: 12px; line-height: 1; }
+  .icon-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 3px; font-size: 15px; line-height: 1; }
   .icon-btn:hover { color: var(--text); }
   .chevron { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 15px; line-height: 1; color: var(--text-dim); transition: transform 0.1s; flex-shrink: 0; }
   .chevron.open { transform: rotate(90deg); }
@@ -91,6 +93,7 @@ export const html = /* html */ `<!doctype html>
     </div>
     <ul id="conn-list"></ul>
   </div>
+  <div id="sidebar-resizer"></div>
   <div id="main">
     <div id="toolbar">
       <button class="primary" id="run-btn" onclick="runQuery()">Run ▸</button>
@@ -626,6 +629,31 @@ function updateAutocompleteActive() {
 document.getElementById('editor').addEventListener('input', handleEditorInput);
 document.getElementById('editor').addEventListener('keydown', handleEditorKeydown);
 document.getElementById('editor').addEventListener('blur', hideAutocomplete);
+
+(function initSidebarResize() {
+  const sidebar = document.getElementById('sidebar');
+  const resizer = document.getElementById('sidebar-resizer');
+  const saved = localStorage.getItem('bdbc.sidebarWidth');
+  if (saved) sidebar.style.width = saved + 'px';
+
+  let dragging = false;
+  resizer.addEventListener('mousedown', (e) => {
+    dragging = true;
+    resizer.classList.add('dragging');
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const width = Math.max(160, Math.min(600, e.clientX));
+    sidebar.style.width = width + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('dragging');
+    localStorage.setItem('bdbc.sidebarWidth', parseInt(sidebar.style.width, 10));
+  });
+})();
 
 loadConnections();
 </script>
