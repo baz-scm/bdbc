@@ -36,8 +36,9 @@ export const html = /* html */ `<!doctype html>
   .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   .conn-actions { display: flex; gap: 6px; visibility: hidden; flex-shrink: 0; }
   .conn-row:hover .conn-actions { visibility: visible; }
-  .icon-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px; font-size: 22px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 4px; }
+  .icon-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 4px; }
   .icon-btn:hover { color: var(--text); background: rgba(128,128,128,0.15); }
+  .icon-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .chevron { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 15px; line-height: 1; color: var(--text-dim); transition: transform 0.1s; flex-shrink: 0; }
   .chevron.open { transform: rotate(90deg); }
   .conn-tables { margin: 2px 0 6px 15px; padding-left: 9px; border-left: 1px solid var(--border); }
@@ -179,9 +180,9 @@ function renderConnList() {
         <span class="chevron\${expandedConns.has(c.id) ? ' open' : ''}">▸</span><span class="conn-dot"></span>\${escapeHtml(c.name)}
       </span>
       <span class="conn-actions">
-        <button class="icon-btn" title="Refresh tables" onclick="event.stopPropagation(); refreshConn('\${c.id}')">⟲</button>
-        <button class="icon-btn" title="Edit" onclick="event.stopPropagation(); openConnModal('\${c.id}')">✎</button>
-        <button class="icon-btn" title="Delete" onclick="event.stopPropagation(); deleteConn('\${c.id}')">✕</button>
+        <button class="icon-btn" title="Refresh tables" onclick="event.stopPropagation(); refreshConn('\${c.id}')"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+        <button class="icon-btn" title="Edit" onclick="event.stopPropagation(); openConnModal('\${c.id}')"><svg viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
+        <button class="icon-btn" title="Delete" onclick="event.stopPropagation(); deleteConn('\${c.id}')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </span>\`;
     row.onclick = () => toggleConn(c.id);
     li.appendChild(row);
