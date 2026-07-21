@@ -3,7 +3,8 @@ export const html = /* html */ `<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>dbclient</title>
+<title>bdbc</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMmQ2ZmM0IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGVsbGlwc2UgY3g9IjEyIiBjeT0iNSIgcng9IjkiIHJ5PSIzIi8+PHBhdGggZD0iTTIxIDV2NmMwIDEuNjYtNC4wMyAzLTkgM3MtOS0xLjM0LTktM1Y1Ii8+PHBhdGggZD0iTTIxIDExdjZjMCAxLjY2LTQuMDMgMy05IDNzLTktMS4zNC05LTN2LTYiLz48L3N2Zz4=" />
 <style>
   :root {
     --bg: #f5f5f7; --bg2: #ffffff; --bg3: #ececef; --border: #d7d7db;

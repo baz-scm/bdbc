@@ -164,4 +164,4 @@ Bun.serve({
   },
 });
 
-console.log(`dbclient listening on http://localhost:${PORT}`);
+console.log(`bdbc listening on http://localhost:${PORT}`);

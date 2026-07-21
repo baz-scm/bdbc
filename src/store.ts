@@ -1,10 +1,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
-const CONFIG_DIR = join(homedir(), ".dbclient");
+const CONFIG_DIR = join(homedir(), ".bdbc");
 const CONFIG_FILE = join(CONFIG_DIR, "connections.json");
+const LEGACY_CONFIG_DIR = join(homedir(), ".dbclient");
+const LEGACY_CONFIG_FILE = join(LEGACY_CONFIG_DIR, "connections.json");
 
 export interface Connection {
   id: string;
@@ -21,7 +23,13 @@ export type PublicConnection = Omit<Connection, "password"> & { hasPassword: boo
 
 function ensureConfig(): void {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
-  if (!existsSync(CONFIG_FILE)) writeFileSync(CONFIG_FILE, "[]\n", { mode: 0o600 });
+  if (!existsSync(CONFIG_FILE)) {
+    if (existsSync(LEGACY_CONFIG_FILE)) {
+      renameSync(LEGACY_CONFIG_FILE, CONFIG_FILE);
+    } else {
+      writeFileSync(CONFIG_FILE, "[]\n", { mode: 0o600 });
+    }
+  }
 }
 
 function readAll(): Connection[] {
