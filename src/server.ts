@@ -9,8 +9,53 @@ import {
 import { testConnection, runQuery, listTables, isDestructive, dropClient } from "./db";
 import { toCsv } from "./csv";
 import { html } from "./ui";
+import pkg from "../package.json";
 
 const PORT = Number(process.env.PORT ?? 4560);
+const VERSION = pkg.version;
+const NPM_PACKAGE = "@baz-scm/bdbc";
+
+function isNewer(latest: string, current: string): boolean {
+  const a = latest.split(".").map(Number);
+  const b = current.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
+async function checkForUpdate(): Promise<string | undefined> {
+  try {
+    const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(NPM_PACKAGE)}/latest`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    if (isNewer(data.version, VERSION)) {
+      return `update: v${VERSION} -> v${data.version} (npx ${NPM_PACKAGE}@latest)`;
+    }
+  } catch {
+    // best-effort only, never block startup on a registry check
+  }
+  return undefined;
+}
+
+const LOGO = [
+  "    .------.",
+  "   /  ____  \\",
+  "  |  |____|  |",
+  "  |  |____|  |",
+  "  |  |____|  |",
+  "   \\________/",
+];
+
+function printBanner(updateLine?: string): void {
+  const lines = [...LOGO, "", `  bdbc  v${VERSION}`];
+  if (updateLine) lines.push(`  ${updateLine}`);
+  console.log("\n" + lines.join("\n") + "\n");
+}
+
+printBanner(await checkForUpdate());
 
 function json(data: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(data), {
