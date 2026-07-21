@@ -2,7 +2,20 @@
   "name": "bdbc",
   "version": "0.1.0",
   "license": "MIT",
+  "description": "A super lightweight Postgres client for the browser",
+  "repository": "github:baz-scm/bdbc",
   "type": "module",
+  "bin": {
+    "bdbc": "bin/bdbc.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "bun --hot src/server.ts",
     "build": "bun build --compile --minify src/server.ts --outfile bdbc"

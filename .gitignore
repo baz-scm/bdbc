@@ -1,3 +1,5 @@
 node_modules/
 bdbc
+dist/
+*.tgz
 *.log

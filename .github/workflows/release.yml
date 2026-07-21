@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not already exist
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Tag v${{ steps.version.outputs.version }} already exists. Bump the version in package.json before releasing." >&2
+            exit 1
+          fi
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          declare -A targets=(
+            [darwin-arm64]=bun-darwin-arm64
+            [darwin-x64]=bun-darwin-x64
+            [linux-arm64]=bun-linux-arm64
+            [linux-x64]=bun-linux-x64
+          )
+          for name in "${!targets[@]}"; do
+            bun build --compile --minify --target="${targets[$name]}" src/server.ts --outfile "dist/bdbc-${name}"
+          done
+          ls -la dist
+
+      - name: Tag release
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" dist/* \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes
+
+      - name: Publish to npm
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: npm publish skipped
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        run: echo "NPM_TOKEN secret not set on this repo; skipped npm publish. Binaries are still attached to the GitHub release."

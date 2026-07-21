@@ -12,7 +12,17 @@ A super lightweight Postgres client for the browser. Single Bun binary, zero ext
 - Export query results to CSV with headers
 - Light/dark theme follows your OS setting
 
-## Requirements
+## Install
+
+```sh
+npx bdbc
+```
+
+No install step, no Bun required on your machine. The `npx` wrapper detects your OS/arch, downloads the matching prebuilt binary from the [latest GitHub release](https://github.com/baz-scm/bdbc/releases) into `~/.cache/bdbc/`, and runs it. Prebuilt binaries cover macOS and Linux, x64 and arm64.
+
+Alternatively, download a binary directly from [GitHub Releases](https://github.com/baz-scm/bdbc/releases) and run it, no npm/npx involved.
+
+## Requirements (building from source)
 
 [Bun](https://bun.sh). `bdbc` uses Bun's built-in Postgres driver (`Bun.SQL`), so there are no npm dependencies at all, in source or in the built binary.
 
@@ -31,7 +41,9 @@ bun run build   # produces ./bdbc, a single native executable (~60MB, bundles th
 
 `PORT=4561 ./bdbc` to run on a different port. The binary is self-contained: no Bun install, no runtime, no dependencies needed on the machine that runs it. Copy it anywhere and execute.
 
-Prebuilt binaries per OS/arch are attached to [GitHub Releases](https://github.com/baz-scm/bdbc/releases) (see the release workflow for how these are built).
+## Releasing
+
+Bump `version` in `package.json`, commit, then trigger the `Release` workflow manually from the Actions tab (or `gh workflow run release.yml`). It builds binaries for macOS/Linux x64/arm64, tags the commit, creates a GitHub Release with the binaries attached and auto-generated notes, and publishes the `bdbc` npm package (the `npx` wrapper) if an `NPM_TOKEN` secret is configured on the repo.
 
 ## Credentials and where things are stored
 
