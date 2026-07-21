@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-"use strict";
 
-const { existsSync, mkdirSync, chmodSync, createWriteStream, renameSync } = require("node:fs");
-const { join } = require("node:path");
-const { homedir, platform, arch } = require("node:os");
-const { spawnSync } = require("node:child_process");
-const https = require("node:https");
+import { existsSync, mkdirSync, chmodSync, createWriteStream, renameSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { homedir, platform, arch } from "node:os";
+import { spawnSync } from "node:child_process";
+import https from "node:https";
 
-const pkg = require("../package.json");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
 const VERSION = pkg.version;
 const REPO = "baz-scm/bdbc";
 

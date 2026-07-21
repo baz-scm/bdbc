@@ -1,6 +1,6 @@
 {
   "name": "@baz-scm/bdbc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "MIT",
   "description": "A super lightweight Postgres client for the browser",
   "repository": "github:baz-scm/bdbc",
@@ -14,7 +14,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "bun --hot src/server.ts",
