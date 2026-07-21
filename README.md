@@ -15,7 +15,7 @@ A super lightweight Postgres client for the browser. Single Bun binary, zero ext
 ## Install
 
 ```sh
-npx bdbc
+npx @baz-scm/bdbc
 ```
 
 No install step, no Bun required on your machine. The `npx` wrapper detects your OS/arch, downloads the matching prebuilt binary from the [latest GitHub release](https://github.com/baz-scm/bdbc/releases) into `~/.cache/bdbc/`, and runs it. Prebuilt binaries cover macOS and Linux, x64 and arm64.
@@ -43,7 +43,18 @@ bun run build   # produces ./bdbc, a single native executable (~60MB, bundles th
 
 ## Releasing
 
-Bump `version` in `package.json`, commit, then trigger the `Release` workflow manually from the Actions tab (or `gh workflow run release.yml`). It builds binaries for macOS/Linux x64/arm64, tags the commit, creates a GitHub Release with the binaries attached and auto-generated notes, and publishes the `bdbc` npm package (the `npx` wrapper) if an `NPM_TOKEN` secret is configured on the repo.
+Bump `version` in `package.json`, commit, then trigger the `Release` workflow manually from the Actions tab (or `gh workflow run release.yml`). It builds binaries for macOS/Linux x64/arm64, publishes the `@baz-scm/bdbc` npm package (the `npx` wrapper) with [provenance](https://docs.npmjs.com/generating-provenance-statements), then tags the commit and creates a GitHub Release with the binaries attached and auto-generated notes.
+
+npm publishing uses [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), authenticated as `baz-scm/bdbc`'s `release.yml` workflow specifically. No `NPM_TOKEN` secret is needed or used.
+
+### Checking provenance
+
+After a publish with provenance, the package page on npmjs.com (`npmjs.com/package/@baz-scm/bdbc`) shows a "Provenance" section linking to the exact GitHub Actions run, commit, and workflow file that produced it. You can also verify from the command line:
+
+```sh
+npm audit signatures   # run from a project that depends on @baz-scm/bdbc
+npm view @baz-scm/bdbc dist.attestations.url
+```
 
 ## Credentials and where things are stored
 
