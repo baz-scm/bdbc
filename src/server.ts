@@ -41,16 +41,14 @@ async function checkForUpdate(): Promise<string | undefined> {
 }
 
 const LOGO = [
-  "    .------.",
-  "   /  ____  \\",
-  "  |  |____|  |",
-  "  |  |____|  |",
-  "  |  |____|  |",
-  "   \\________/",
+  " ____  ____  ____   ___ ",
+  "(  _ \\(    \\(  _ \\ / __)",
+  " ) _ ( ) D ( ) _ (( (__ ",
+  "(____/(____/(____/ \\___)",
 ];
 
 function printBanner(updateLine?: string): void {
-  const lines = [...LOGO, "", `  bdbc  v${VERSION}`];
+  const lines = [...LOGO, "", `  v${VERSION}`];
   if (updateLine) lines.push(`  ${updateLine}`);
   console.log("\n" + lines.join("\n") + "\n");
 }
@@ -209,4 +207,4 @@ Bun.serve({
   },
 });
 
-console.log(`bdbc listening on http://localhost:${PORT}`);
+console.log(`listening on http://localhost:${PORT}`);
