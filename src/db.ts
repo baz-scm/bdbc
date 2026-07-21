@@ -93,20 +93,22 @@ export interface TableInfo {
 }
 
 export async function listTables(conn: Connection): Promise<TableInfo[]> {
-  const { tables, columns } = await withReconnect(conn, async (client) => ({
-    tables: await client`
-      select table_schema as schema, table_name as name
-      from information_schema.tables
-      where table_schema not in ('pg_catalog', 'information_schema')
-      order by table_schema, table_name
-    `,
-    columns: await client`
-      select table_schema as schema, table_name as name, column_name as col, data_type as type, is_nullable = 'YES' as nullable
-      from information_schema.columns
-      where table_schema not in ('pg_catalog', 'information_schema')
-      order by table_schema, table_name, ordinal_position
-    `,
-  }));
+  const [tables, columns] = await withReconnect(conn, (client) =>
+    Promise.all([
+      client`
+        select table_schema as schema, table_name as name
+        from information_schema.tables
+        where table_schema not in ('pg_catalog', 'information_schema')
+        order by table_schema, table_name
+      `,
+      client`
+        select table_schema as schema, table_name as name, column_name as col, data_type as type, is_nullable = 'YES' as nullable
+        from information_schema.columns
+        where table_schema not in ('pg_catalog', 'information_schema')
+        order by table_schema, table_name, ordinal_position
+      `,
+    ]),
+  );
   return (tables as any[]).map((t) => ({
     schema: t.schema,
     name: t.name,

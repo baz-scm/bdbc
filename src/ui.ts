@@ -34,10 +34,10 @@ export const html = /* html */ `<!doctype html>
   .conn-row.active { background: var(--active-bg); }
   .conn-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; display: flex; align-items: center; gap: 5px; }
   .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-  .conn-actions { display: flex; gap: 4px; visibility: hidden; flex-shrink: 0; }
+  .conn-actions { display: flex; gap: 6px; visibility: hidden; flex-shrink: 0; }
   .conn-row:hover .conn-actions { visibility: visible; }
-  .icon-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 3px; font-size: 15px; line-height: 1; }
-  .icon-btn:hover { color: var(--text); }
+  .icon-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px; font-size: 22px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 4px; }
+  .icon-btn:hover { color: var(--text); background: rgba(128,128,128,0.15); }
   .chevron { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 15px; line-height: 1; color: var(--text-dim); transition: transform 0.1s; flex-shrink: 0; }
   .chevron.open { transform: rotate(90deg); }
   .conn-tables { margin: 2px 0 6px 15px; padding-left: 9px; border-left: 1px solid var(--border); }
