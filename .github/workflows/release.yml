@@ -1,4 +1,5 @@
 name: Release
+run-name: Release triggered by ${{ github.actor }}
 
 on:
   workflow_dispatch: {}
@@ -13,6 +14,8 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,11 +67,11 @@ jobs:
             --generate-notes
 
       - name: Publish to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ env.NPM_TOKEN != '' }}
         run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
 
       - name: npm publish skipped
-        if: ${{ secrets.NPM_TOKEN == '' }}
+        if: ${{ env.NPM_TOKEN == '' }}
         run: echo "NPM_TOKEN secret not set on this repo; skipped npm publish. Binaries are still attached to the GitHub release."
