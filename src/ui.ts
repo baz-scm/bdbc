@@ -524,15 +524,69 @@ let acIndex = -1;
 let acStart = 0;
 let acEnd = 0;
 
-function identifierCandidates() {
+function cachedTables() {
   const cached = tablesCache.get(activeConnId);
-  if (!Array.isArray(cached)) return [];
+  return Array.isArray(cached) ? cached : [];
+}
+
+function tableCandidates() {
   const names = new Set();
-  for (const t of cached) {
+  for (const t of cachedTables()) {
     names.add(t.name);
     names.add(t.schema + '.' + t.name);
   }
   return [...names];
+}
+
+function columnCandidates() {
+  const names = new Set();
+  for (const t of cachedTables()) for (const c of t.columns) names.add(c.name);
+  return [...names];
+}
+
+function findTableInfo(name) {
+  const lower = name.toLowerCase();
+  return cachedTables().find((t) => t.name.toLowerCase() === lower || (t.schema + '.' + t.name).toLowerCase() === lower) || null;
+}
+
+const ALIAS_RE = /\\b(?:from|join)\\s+((?:[\\w]+\\.)?[\\w]+)\\s+(?:as\\s+)?([a-zA-Z_]\\w*)\\b/gi;
+const NOT_AN_ALIAS = /^(where|group|order|having|join|on|inner|left|right|full|cross|using|set|values|limit|offset|as)$/i;
+
+function buildAliasMap(sql) {
+  const map = {};
+  let m;
+  ALIAS_RE.lastIndex = 0;
+  while ((m = ALIAS_RE.exec(sql))) {
+    if (NOT_AN_ALIAS.test(m[2])) continue;
+    map[m[2].toLowerCase()] = m[1];
+  }
+  return map;
+}
+
+function resolveTableColumns(prefix, sql) {
+  if (!prefix) return null;
+  const aliasMap = buildAliasMap(sql);
+  const resolved = aliasMap[prefix.toLowerCase()] || prefix;
+  const info = findTableInfo(resolved);
+  return info ? info.columns.map((c) => c.name) : null;
+}
+
+const TABLE_CONTEXT_RE = /\\b(from|join|into|update)\\b/gi;
+const COLUMN_CONTEXT_RE = /\\b(select|where|and|or|on|set|by|having|values|when|case)\\b/gi;
+
+function lastMatchEnd(regex, text) {
+  regex.lastIndex = 0;
+  let m;
+  let lastEnd = -1;
+  while ((m = regex.exec(text))) lastEnd = regex.lastIndex;
+  return lastEnd;
+}
+
+function classifyContext(before) {
+  const tableEnd = lastMatchEnd(TABLE_CONTEXT_RE, before);
+  const columnEnd = lastMatchEnd(COLUMN_CONTEXT_RE, before);
+  if (tableEnd === -1 && columnEnd === -1) return 'column';
+  return tableEnd > columnEnd ? 'table' : 'column';
 }
 
 function currentWordRange(editor) {
@@ -582,13 +636,27 @@ function acceptAutocomplete(index) {
 function handleEditorInput() {
   const editor = document.getElementById('editor');
   const { start, end, word } = currentWordRange(editor);
-  const bare = word.replace(/^.*\\./, '');
-  if (!bare || bare.length < 1) {
+  if (!word) {
     hideAutocomplete();
     return;
   }
-  const candidates = identifierCandidates();
-  const matches = candidates.filter((c) => c.toLowerCase().startsWith(word.toLowerCase())).slice(0, 8);
+
+  const dotIdx = word.lastIndexOf('.');
+  const context = classifyContext(editor.value.slice(0, start));
+
+  let matches;
+  if (dotIdx >= 0 && context !== 'table') {
+    const prefix = word.slice(0, dotIdx);
+    const colPrefix = word.slice(dotIdx + 1);
+    const cols = resolveTableColumns(prefix, editor.value) ?? [];
+    matches = cols.filter((c) => c.toLowerCase().startsWith(colPrefix.toLowerCase())).map((c) => prefix + '.' + c);
+  } else if (context === 'table') {
+    matches = tableCandidates().filter((c) => c.toLowerCase().startsWith(word.toLowerCase()));
+  } else {
+    matches = columnCandidates().filter((c) => c.toLowerCase().startsWith(word.toLowerCase()));
+  }
+
+  matches = matches.slice(0, 8);
   if (!matches.length) {
     hideAutocomplete();
     return;
