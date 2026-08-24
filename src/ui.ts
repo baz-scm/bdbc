@@ -50,13 +50,26 @@ export const html = /* html */ `<!doctype html>
   .sidebar-msg { padding: 4px 8px 4px 16px; font-size: 12px; color: var(--text-dim); }
   #new-conn-btn { background: var(--accent); border: none; color: white; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #tab-bar { display: none; overflow-x: auto; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px; font-size: 12px; cursor: pointer; border-right: 1px solid var(--border); white-space: nowrap; color: var(--text-dim); }
+  .tab.active { background: var(--bg); color: var(--text); font-weight: 600; }
+  .tab:hover { background: var(--bg3); }
+  .tab-close { background: none; border: none; color: inherit; cursor: pointer; padding: 0 3px; font-size: 13px; line-height: 1.4; border-radius: 3px; }
+  .tab-close:hover { background: rgba(128,128,128,0.25); }
   #toolbar { display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); align-items: center; }
+  .conn-badge { display: none; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; padding: 4px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   #editor-wrap { position: relative; padding: 8px; }
   #editor { width: 100%; height: 120px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 13px; padding: 8px; resize: vertical; }
-  #autocomplete { position: absolute; left: 8px; z-index: 20; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; max-height: 160px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.25); display: none; min-width: 200px; }
+  #autocomplete { position: absolute; z-index: 20; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; max-height: 160px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.25); display: none; min-width: 200px; }
   #autocomplete.show { display: block; }
-  .ac-item { padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  .ac-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
   .ac-item:hover, .ac-item.active { background: var(--active-bg); }
+  .ac-kind { flex-shrink: 0; width: 14px; height: 14px; border-radius: 3px; color: white; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .ac-kind-table { background: var(--accent); }
+  .ac-kind-column { background: var(--success); }
+  .ac-kind-keyword { background: var(--text-dim); }
+  .ac-kind-operator { background: var(--danger); }
+  .ac-text { overflow: hidden; text-overflow: ellipsis; }
   button.primary { background: var(--accent); border: none; color: white; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
   button.secondary { background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
   button.danger { background: var(--danger); border: none; color: white; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
@@ -68,6 +81,13 @@ export const html = /* html */ `<!doctype html>
   table.grid th { background: var(--bg3); position: sticky; top: 0; color: var(--text-dim); }
   table.grid td.null { color: var(--text-dim); font-style: italic; }
   table.grid tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  table.grid td { cursor: cell; }
+  table.grid td.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+  table.grid td.editing { outline: 2px solid var(--success); outline-offset: -2px; background: var(--bg2); white-space: normal; cursor: text; }
+  table.grid td.saving { opacity: 0.6; }
+  table.grid td.save-error { outline: 2px solid var(--danger); }
+  table.grid tr.new-row td { background: var(--active-bg); cursor: text; white-space: normal; }
+  table.grid tr.new-row.saving td { opacity: 0.6; }
   #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 10; }
   #overlay.show { display: flex; }
   .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; width: 340px; }
@@ -83,6 +103,10 @@ export const html = /* html */ `<!doctype html>
   .modal .actions .left { display: flex; gap: 8px; }
   .empty-state { color: var(--text-dim); padding: 20px; text-align: center; }
   .error-msg { color: var(--danger); padding: 8px; font-size: 12px; white-space: pre-wrap; }
+  .error-panel { display: flex; flex-direction: column; gap: 4px; }
+  .err-message { font-weight: 600; }
+  .err-loc { cursor: pointer; text-decoration: underline; color: var(--accent); width: fit-content; }
+  .err-detail, .err-hint, .err-code { color: var(--text-dim); font-style: normal; }
 </style>
 </head>
 <body>
@@ -96,10 +120,13 @@ export const html = /* html */ `<!doctype html>
   </div>
   <div id="sidebar-resizer"></div>
   <div id="main">
+    <div id="tab-bar"></div>
     <div id="toolbar">
+      <span id="active-conn-badge" class="conn-badge"></span>
       <button class="primary" id="run-btn" onclick="runQuery()">Run ▸</button>
       <button class="secondary" id="explain-btn" onclick="runQuery(false, true)">Explain</button>
       <button class="secondary" id="export-btn" onclick="exportCsv()">Export CSV</button>
+      <button class="secondary" id="copy-csv-btn" onclick="copyCsv()">Copy CSV</button>
       <span id="status"></span>
     </div>
     <div id="editor-wrap">
@@ -153,6 +180,113 @@ let activeConnId = null;
 const tablesCache = new Map();
 const expandedConns = new Set();
 const expandedSchemas = new Set();
+const tabState = new Map(); // connId -> { sql, result, error, status }
+let tabOrder = [];
+
+function openTab(connId) {
+  if (!tabState.has(connId)) {
+    tabState.set(connId, { sql: '', result: null, error: null, status: '' });
+    tabOrder.push(connId);
+  }
+  switchTab(connId);
+}
+
+function renderActiveConnBadge() {
+  const badge = document.getElementById('active-conn-badge');
+  if (!activeConnId) {
+    badge.style.display = 'none';
+    badge.innerHTML = '';
+    badge.title = '';
+    return;
+  }
+  const conn = connections.find((c) => c.id === activeConnId);
+  badge.style.display = 'inline-flex';
+  if (!conn) {
+    badge.innerHTML = '(deleted connection)';
+    badge.title = '';
+    return;
+  }
+  badge.innerHTML = \`<span class="conn-dot"></span>\${escapeHtml(conn.name)}\`;
+  badge.title = \`\${conn.host}:\${conn.port}/\${conn.database}\`;
+}
+
+function switchTab(connId) {
+  if (connId === activeConnId) {
+    renderTabBar();
+    renderActiveConnBadge();
+    return;
+  }
+  if (activeConnId && tabState.has(activeConnId)) {
+    tabState.get(activeConnId).sql = document.getElementById('editor').value;
+  }
+  activeConnId = connId;
+  const state = tabState.get(connId) || { sql: '', result: null, error: null, status: '' };
+  document.getElementById('editor').value = state.sql;
+  document.getElementById('status').textContent = state.status || '';
+  if (state.error) {
+    renderQueryError(state.error, state.sql);
+  } else if (state.result) {
+    renderResults(state.result);
+  } else {
+    resetResultsState();
+    document.getElementById('results-wrap').innerHTML = '<div class="empty-state">Run a query to see results.</div>';
+  }
+  hideAutocomplete();
+  renderTabBar();
+  renderActiveConnBadge();
+  renderConnList();
+}
+
+function closeTab(connId, e) {
+  if (e) e.stopPropagation();
+  if (!tabState.has(connId)) return;
+  tabState.delete(connId);
+  tabOrder = tabOrder.filter((id) => id !== connId);
+  if (activeConnId === connId) {
+    activeConnId = null;
+    const next = tabOrder[tabOrder.length - 1] || null;
+    if (next) {
+      switchTab(next);
+    } else {
+      document.getElementById('editor').value = '';
+      document.getElementById('status').textContent = '';
+      resetResultsState();
+      document.getElementById('results-wrap').innerHTML = '<div class="empty-state">Pick a connection to get started.</div>';
+      renderTabBar();
+      renderActiveConnBadge();
+      renderConnList();
+    }
+  } else {
+    renderTabBar();
+  }
+}
+
+function renderTabBar() {
+  const bar = document.getElementById('tab-bar');
+  if (!tabOrder.length) {
+    bar.innerHTML = '';
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  bar.innerHTML = tabOrder
+    .map((id) => {
+      const conn = connections.find((c) => c.id === id);
+      const name = conn ? conn.name : '(deleted)';
+      const active = id === activeConnId ? ' active' : '';
+      return \`<div class="tab\${active}" data-id="\${id}"><span class="tab-name">\${escapeHtml(name)}</span><button class="tab-close" data-id="\${id}" title="Close tab">×</button></div>\`;
+    })
+    .join('');
+  bar.querySelectorAll('.tab').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab-close')) return;
+      switchTab(el.dataset.id);
+    });
+  });
+  bar.querySelectorAll('.tab-close').forEach((el) => {
+    el.addEventListener('click', (e) => closeTab(el.dataset.id, e));
+  });
+}
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -166,6 +300,7 @@ async function api(path, opts) {
 async function loadConnections() {
   connections = await api('/api/connections');
   renderConnList();
+  renderActiveConnBadge();
 }
 
 function renderConnList() {
@@ -198,7 +333,7 @@ function renderConnList() {
 
 async function toggleConn(id) {
   const wasActive = id === activeConnId;
-  activeConnId = id;
+  openTab(id);
   if (expandedConns.has(id) && wasActive) {
     expandedConns.delete(id);
   } else {
@@ -263,24 +398,32 @@ function renderConnTables(container, connId) {
 }
 
 function previewTable(connId, schema, name) {
-  activeConnId = connId;
-  renderConnList();
+  openTab(connId);
   const q = \`select * from "\${schema}"."\${name}" limit 100\`;
   document.getElementById('editor').value = q;
+  if (tabState.has(connId)) tabState.get(connId).sql = q;
   runQuery();
+}
+
+function setTabStatus(connId, text) {
+  if (tabState.has(connId)) tabState.get(connId).status = text;
+  if (connId === activeConnId) document.getElementById('status').textContent = text;
 }
 
 async function runQuery(confirm, explain) {
   if (!activeConnId) return;
   hideAutocomplete();
-  let sql = document.getElementById('editor').value.trim();
-  if (!sql) return;
-  if (explain && !/^\\s*explain\\b/i.test(sql)) sql = 'EXPLAIN ' + sql;
+  const connId = activeConnId;
+  const rawSql = document.getElementById('editor').value.trim();
+  if (!rawSql) return;
+  const wasPrefixed = explain && !/^\\s*explain\\b/i.test(rawSql);
+  const sql = wasPrefixed ? 'EXPLAIN ' + rawSql : rawSql;
+  const explainOffset = wasPrefixed ? 'EXPLAIN '.length : 0;
   const runBtn = document.getElementById('run-btn');
   runBtn.disabled = true;
-  document.getElementById('status').textContent = explain ? 'Explaining…' : 'Running…';
+  setTabStatus(connId, explain ? 'Explaining…' : 'Running…');
   try {
-    const res = await fetch(\`/api/connections/\${activeConnId}/query\`, {
+    const res = await fetch(\`/api/connections/\${connId}/query\`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql, confirm: !!confirm }),
@@ -288,22 +431,137 @@ async function runQuery(confirm, explain) {
     const body = await res.json();
     if (res.status === 409 && body.needsConfirm) {
       openConfirmModal(body.reason, () => runQuery(true, explain));
-      document.getElementById('status').textContent = '';
+      setTabStatus(connId, '');
       return;
     }
-    if (!res.ok) throw new Error(body.error || 'Query failed');
-    renderResults(body);
-    document.getElementById('status').textContent = \`\${body.rows.length} row(s)\`;
+    if (!res.ok) {
+      const errObj = typeof body.error === 'string' ? { message: body.error } : (body.error || { message: 'Query failed' });
+      throw { ...errObj, explainOffset };
+    }
+    if (tabState.has(connId)) {
+      tabState.get(connId).result = body;
+      tabState.get(connId).error = null;
+    }
+    if (connId === activeConnId) renderResults(body);
+    setTabStatus(connId, \`\${body.rows.length} row(s)\`);
   } catch (err) {
-    document.getElementById('results-wrap').innerHTML = \`<div class="error-msg">\${escapeHtml(err.message)}</div>\`;
-    document.getElementById('status').textContent = '';
+    const errObj = err && typeof err === 'object' && 'message' in err ? err : { message: String(err && err.message ? err.message : err) };
+    if (tabState.has(connId)) {
+      tabState.get(connId).result = null;
+      tabState.get(connId).error = errObj;
+    }
+    if (connId === activeConnId) renderQueryError(errObj, rawSql);
+    setTabStatus(connId, '');
   } finally {
     runBtn.disabled = false;
   }
 }
 
+function computeLineCol(sql, position) {
+  if (position == null || position < 1) return null;
+  const clamped = Math.min(position, sql.length + 1);
+  let line = 1;
+  let col = 1;
+  for (let i = 0; i < clamped - 1; i++) {
+    if (sql[i] === '\\n') {
+      line++;
+      col = 1;
+    } else {
+      col++;
+    }
+  }
+  return { line, col, offset: clamped - 1 };
+}
+
+function renderQueryError(err, editorSql) {
+  resetResultsState();
+  const wrap = document.getElementById('results-wrap');
+  const rawOffset = err.position != null ? err.position - (err.explainOffset || 0) : undefined;
+  const loc = rawOffset != null ? computeLineCol(editorSql, rawOffset) : null;
+  const parts = [];
+  parts.push(\`<div class="err-message">\${escapeHtml(err.message || 'Query failed')}</div>\`);
+  if (loc) {
+    parts.push(\`<div class="err-loc" data-offset="\${loc.offset}">Ln \${loc.line}, Col \${loc.col}</div>\`);
+  }
+  if (err.detail) parts.push(\`<div class="err-detail"><b>Detail:</b> \${escapeHtml(err.detail)}</div>\`);
+  if (err.hint) parts.push(\`<div class="err-hint"><b>Hint:</b> \${escapeHtml(err.hint)}</div>\`);
+  if (err.sqlState) parts.push(\`<div class="err-code">SQLSTATE \${escapeHtml(err.sqlState)}</div>\`);
+  wrap.innerHTML = \`<div class="error-msg error-panel">\${parts.join('')}</div>\`;
+  const locEl = wrap.querySelector('.err-loc');
+  if (locEl) {
+    locEl.onclick = () => {
+      const editor = document.getElementById('editor');
+      const off = Number(locEl.dataset.offset);
+      editor.focus();
+      editor.setSelectionRange(off, off);
+    };
+  }
+}
+
+let resultsEditInfo = null;
+let resultsColumns = [];
+let resultsRows = [];
+let editingCell = null;
+let editingOriginalText = '';
+let selectedCell = null;
+let pendingRow = null;
+
+function ensureTablesLoaded(connId) {
+  if (tablesCache.has(connId)) return;
+  tablesCache.set(connId, 'loading');
+  api(\`/api/connections/\${connId}/tables\`)
+    .then((tables) => tablesCache.set(connId, tables))
+    .catch((err) => tablesCache.set(connId, { error: err.message }));
+}
+
+function columnType(colName) {
+  if (!resultsEditInfo) return null;
+  const info = findTableInfo(resultsEditInfo.schema + '.' + resultsEditInfo.table);
+  if (!info) return null;
+  const col = info.columns.find((c) => c.name === colName);
+  return col ? col.type : null;
+}
+
+function toPgArrayLiteral(arr) {
+  const esc = (v) =>
+    v === null || v === undefined ? 'NULL' : '"' + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '"';
+  return '{' + arr.map(esc).join(',') + '}';
+}
+
+function serializeForColumn(colName, text) {
+  const colType = columnType(colName);
+  if (colType !== 'ARRAY' && colType !== 'json' && colType !== 'jsonb') {
+    return { ok: true, value: text };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: \`"\${colName}" needs valid JSON, e.g. \${colType === 'ARRAY' ? '["a","b"]' : '{"k":"v"}'}\` };
+  }
+  if (colType === 'ARRAY') {
+    if (!Array.isArray(parsed)) return { ok: false, error: \`"\${colName}" needs a JSON array, e.g. ["a","b"]\` };
+    return { ok: true, value: toPgArrayLiteral(parsed) };
+  }
+  return { ok: true, value: parsed };
+}
+
+function resetResultsState() {
+  resultsEditInfo = null;
+  resultsColumns = [];
+  resultsRows = [];
+  editingCell = null;
+  selectedCell = null;
+  pendingRow = null;
+}
+
 function renderResults(result) {
   const wrap = document.getElementById('results-wrap');
+  resetResultsState();
+  resultsEditInfo = result.edit || null;
+  resultsColumns = result.columns;
+  resultsRows = result.rows;
+  if (resultsEditInfo) ensureTablesLoaded(activeConnId);
   if (!result.columns.length) {
     wrap.innerHTML = \`<div class="empty-state">\${result.command} OK — \${result.rowCount} row(s) affected</div>\`;
     return;
@@ -317,25 +575,376 @@ function renderResults(result) {
     thead.appendChild(th);
   }
   table.appendChild(thead);
-  for (const row of result.rows) {
+  result.rows.forEach((row, rowIndex) => {
     const tr = document.createElement('tr');
-    for (const cell of row) {
+    row.forEach((cell, colIndex) => {
       const td = document.createElement('td');
-      if (cell === null || cell === undefined) {
-        td.textContent = 'NULL';
-        td.className = 'null';
-      } else if (typeof cell === 'object') {
-        td.textContent = JSON.stringify(cell);
-      } else {
-        td.textContent = String(cell);
-      }
+      td.dataset.row = String(rowIndex);
+      td.dataset.col = String(colIndex);
+      setCellDisplay(td, cell);
+      td.addEventListener('click', () => selectCell(td));
+      td.addEventListener('dblclick', () => maybeStartEdit(td, rowIndex, colIndex));
       tr.appendChild(td);
-    }
+    });
     table.appendChild(tr);
-  }
+  });
   wrap.innerHTML = '';
   wrap.appendChild(table);
 }
+
+function setCellDisplay(td, cell) {
+  if (cell === null || cell === undefined) {
+    td.textContent = 'NULL';
+    td.className = 'null';
+  } else if (typeof cell === 'object') {
+    td.textContent = JSON.stringify(cell);
+    td.className = '';
+  } else {
+    td.textContent = String(cell);
+    td.className = '';
+  }
+}
+
+function selectAllText(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function selectCell(td) {
+  if (editingCell) return;
+  if (selectedCell) selectedCell.classList.remove('selected');
+  selectedCell = td;
+  td.classList.add('selected');
+  selectAllText(td);
+}
+
+function maybeStartEdit(td, rowIndex, colIndex) {
+  if (editingCell === td) return;
+  startEdit(td, rowIndex, colIndex);
+}
+
+function startEdit(td, rowIndex, colIndex) {
+  if (!resultsEditInfo) {
+    document.getElementById('status').textContent =
+      "Not editable: query must be a simple single-table select whose results include the table's primary key.";
+    return;
+  }
+  if (selectedCell) { selectedCell.classList.remove('selected'); selectedCell = null; }
+  editingCell = td;
+  editingOriginalText = td.textContent;
+  td.classList.remove('null', 'save-error');
+  td.classList.add('editing');
+  td.contentEditable = 'true';
+  td.focus();
+  selectAllText(td);
+  td.addEventListener('keydown', onEditKeydown);
+}
+
+function isCellDirty() {
+  return !!editingCell && editingCell.textContent !== editingOriginalText;
+}
+
+function exitEditState() {
+  if (editingCell) {
+    editingCell.contentEditable = 'false';
+    editingCell.classList.remove('editing', 'save-error', 'saving');
+    editingCell.removeEventListener('keydown', onEditKeydown);
+  }
+  editingCell = null;
+  editingOriginalText = '';
+}
+
+function revertEdit() {
+  const td = editingCell;
+  if (!td) return;
+  const rowIndex = Number(td.dataset.row);
+  const colIndex = Number(td.dataset.col);
+  setCellDisplay(td, resultsRows[rowIndex][colIndex]);
+  exitEditState();
+}
+
+function onEditKeydown(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault();
+    saveEdit();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    revertEdit();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+  }
+}
+
+async function saveEdit() {
+  const td = editingCell;
+  if (!td) return;
+  const rowIndex = Number(td.dataset.row);
+  const colIndex = Number(td.dataset.col);
+  const colName = resultsColumns[colIndex];
+  const newText = td.textContent;
+  td.classList.remove('save-error');
+  document.getElementById('status').textContent = 'Saving…';
+  if (newText === editingOriginalText) {
+    exitEditState();
+    document.getElementById('status').textContent = '';
+    return;
+  }
+  const serialized = serializeForColumn(colName, newText);
+  if (!serialized.ok) {
+    td.classList.add('save-error');
+    document.getElementById('status').textContent = serialized.error;
+    return;
+  }
+  const pk = resultsEditInfo.pkColumns.map((pkCol) => ({
+    column: pkCol,
+    value: resultsRows[rowIndex][resultsColumns.indexOf(pkCol)],
+  }));
+  td.classList.add('saving');
+  try {
+    const res = await api(\`/api/connections/\${activeConnId}/update-cell\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schema: resultsEditInfo.schema,
+        table: resultsEditInfo.table,
+        pk,
+        column: colName,
+        value: serialized.value,
+      }),
+    });
+    td.classList.remove('saving');
+    if (!res.rowCount) {
+      td.classList.add('save-error');
+      document.getElementById('status').textContent = 'Save failed: no rows matched — the row may have changed underneath you.';
+      return;
+    }
+    const colType = columnType(colName);
+    resultsRows[rowIndex][colIndex] =
+      colType === 'ARRAY' || colType === 'json' || colType === 'jsonb' ? JSON.parse(newText) : newText;
+    document.getElementById('status').textContent = \`Saved (\${res.rowCount} row\${res.rowCount === 1 ? '' : 's'}).\`;
+    exitEditState();
+  } catch (err) {
+    td.classList.remove('saving');
+    td.classList.add('save-error');
+    document.getElementById('status').textContent = 'Save failed: ' + err.message;
+  }
+}
+
+function hasUnsavedNewRow() {
+  return !!pendingRow && pendingRow.touched.some(Boolean);
+}
+
+function startNewRow() {
+  if (!resultsEditInfo) {
+    document.getElementById('status').textContent =
+      "Can't add a row: this result isn't tied to an editable table.";
+    return;
+  }
+  if (editingCell && isCellDirty()) {
+    showUnsavedEditWarning();
+    return;
+  }
+  if (editingCell) exitEditState();
+  if (pendingRow) {
+    pendingRow.tds[0].focus();
+    return;
+  }
+  const table = document.querySelector('#results-wrap table.grid');
+  if (!table) return;
+  const tr = document.createElement('tr');
+  tr.className = 'new-row';
+  const tds = resultsColumns.map((_, colIndex) => {
+    const td = document.createElement('td');
+    td.contentEditable = 'true';
+    const onKeydown = (e) => onNewRowKeydown(e, colIndex);
+    td._newRowKeydown = onKeydown;
+    td.addEventListener('keydown', onKeydown);
+    td.addEventListener('input', () => { pendingRow.touched[colIndex] = true; });
+    tr.appendChild(td);
+    return td;
+  });
+  table.appendChild(tr);
+  pendingRow = { tr, tds, touched: resultsColumns.map(() => false) };
+  tds[0].focus();
+  tr.scrollIntoView({ block: 'nearest' });
+  document.getElementById('status').textContent = 'New row: Tab between fields, Cmd+Enter to save, Esc to cancel.';
+}
+
+function cancelNewRow() {
+  if (!pendingRow) return;
+  pendingRow.tr.remove();
+  pendingRow = null;
+  document.getElementById('status').textContent = 'New row discarded.';
+}
+
+function onNewRowKeydown(e, colIndex) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault();
+    submitNewRow();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelNewRow();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    const next = colIndex + (e.shiftKey ? -1 : 1);
+    if (next >= 0 && next < pendingRow.tds.length) pendingRow.tds[next].focus();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const next = colIndex + 1;
+    if (next < pendingRow.tds.length) pendingRow.tds[next].focus();
+    else submitNewRow();
+  }
+}
+
+async function submitNewRow() {
+  if (!pendingRow) return;
+  const values = {};
+  for (let i = 0; i < resultsColumns.length; i++) {
+    if (!pendingRow.touched[i]) continue;
+    const colName = resultsColumns[i];
+    const serialized = serializeForColumn(colName, pendingRow.tds[i].textContent);
+    if (!serialized.ok) {
+      pendingRow.tds[i].classList.add('save-error');
+      document.getElementById('status').textContent = serialized.error;
+      return;
+    }
+    values[colName] = serialized.value;
+  }
+  if (!Object.keys(values).length) {
+    document.getElementById('status').textContent = 'Type a value in at least one column before saving.';
+    return;
+  }
+  pendingRow.tds.forEach((td) => td.classList.remove('save-error'));
+  pendingRow.tr.classList.add('saving');
+  try {
+    const res = await api(\`/api/connections/\${activeConnId}/insert-row\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema: resultsEditInfo.schema, table: resultsEditInfo.table, values }),
+    });
+    const row = pendingRow;
+    const newRow = resultsColumns.map((c) => (res.row && c in res.row ? res.row[c] : null));
+    const rowIndex = resultsRows.length;
+    resultsRows.push(newRow);
+    row.tds.forEach((td, i) => {
+      td.contentEditable = 'false';
+      td.classList.remove('save-error');
+      td.removeEventListener('keydown', td._newRowKeydown);
+      td.dataset.row = String(rowIndex);
+      td.dataset.col = String(i);
+      setCellDisplay(td, newRow[i]);
+      td.addEventListener('click', () => selectCell(td));
+      td.addEventListener('dblclick', () => maybeStartEdit(td, rowIndex, i));
+    });
+    row.tr.classList.remove('new-row', 'saving');
+    document.getElementById('status').textContent = 'Row added.';
+    pendingRow = null;
+  } catch (err) {
+    pendingRow.tr.classList.remove('saving');
+    document.getElementById('status').textContent = 'Insert failed: ' + err.message;
+  }
+}
+
+function showUnsavedRowWarning() {
+  if (!pendingRow) return;
+  const overlay = document.getElementById('overlay-confirm');
+  overlay.innerHTML = \`<div id="overlay" class="show"><div class="modal">
+    <h2>Unsaved new row</h2>
+    <p style="font-size:12px;color:var(--text-dim)">You started a new row. Press Cmd+Enter to save it, or discard it.</p>
+    <div class="actions">
+      <button class="secondary" id="warn-keep">Keep editing</button>
+      <button class="danger" id="warn-discard">Discard row</button>
+    </div>
+  </div></div>\`;
+  const close = () => { overlay.innerHTML = ''; document.removeEventListener('keydown', onKeydown, true); };
+  function onKeydown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      close();
+      submitNewRow();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      if (pendingRow) pendingRow.tds[0].focus();
+    }
+  }
+  document.getElementById('warn-keep').onclick = () => { close(); if (pendingRow) pendingRow.tds[0].focus(); };
+  document.getElementById('warn-discard').onclick = () => { close(); cancelNewRow(); };
+  document.addEventListener('keydown', onKeydown, true);
+}
+
+function showUnsavedEditWarning() {
+  const td = editingCell;
+  if (!td) return;
+  const overlay = document.getElementById('overlay-confirm');
+  overlay.innerHTML = \`<div id="overlay" class="show"><div class="modal">
+    <h2>Unsaved cell edit</h2>
+    <p style="font-size:12px;color:var(--text-dim)">This cell has an unsaved change. Press Cmd+Enter to save it, or discard it.</p>
+    <div class="actions">
+      <button class="secondary" id="warn-keep">Keep editing</button>
+      <button class="danger" id="warn-discard">Discard changes</button>
+    </div>
+  </div></div>\`;
+  const close = () => { overlay.innerHTML = ''; document.removeEventListener('keydown', onKeydown, true); };
+  function onKeydown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      close();
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      td.focus();
+    }
+  }
+  document.getElementById('warn-keep').onclick = () => { close(); td.focus(); };
+  document.getElementById('warn-discard').onclick = () => { close(); revertEdit(); };
+  document.addEventListener('keydown', onKeydown, true);
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (editingCell && !editingCell.contains(e.target) && isCellDirty()) {
+    e.preventDefault();
+    return;
+  }
+  if (pendingRow && !pendingRow.tr.contains(e.target) && hasUnsavedNewRow()) {
+    e.preventDefault();
+  }
+}, true);
+
+document.addEventListener('click', (e) => {
+  if (editingCell && !editingCell.contains(e.target)) {
+    if (!isCellDirty()) {
+      exitEditState();
+    } else {
+      e.preventDefault();
+      e.stopPropagation();
+      showUnsavedEditWarning();
+      return;
+    }
+  }
+  if (pendingRow && !pendingRow.tr.contains(e.target)) {
+    if (!hasUnsavedNewRow()) {
+      cancelNewRow();
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    showUnsavedRowWarning();
+  }
+}, true);
+
+document.addEventListener('keydown', (e) => {
+  if (!e.ctrlKey || e.key.toLowerCase() !== 'n') return;
+  if (document.getElementById('overlay').classList.contains('show')) return;
+  if (document.getElementById('overlay-confirm').innerHTML.trim()) return;
+  if (!activeConnId) return;
+  e.preventDefault();
+  startNewRow();
+}, true);
 
 async function exportCsv() {
   if (!activeConnId) return;
@@ -350,7 +959,8 @@ async function exportCsv() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(body.error || res.statusText);
+      const msg = typeof body.error === 'string' ? body.error : (body.error && body.error.message) || res.statusText;
+      throw new Error(msg);
     }
     const blob = await res.blob();
     const a = document.createElement('a');
@@ -360,6 +970,49 @@ async function exportCsv() {
     URL.revokeObjectURL(a.href);
   } catch (err) {
     document.getElementById('status').textContent = 'Export failed: ' + err.message;
+  }
+}
+
+function escapeCsvCell(value) {
+  if (value === null || value === undefined) return '';
+  let str;
+  if (value instanceof Date) str = value.toISOString();
+  else if (typeof value === 'object') str = JSON.stringify(value);
+  else str = String(value);
+  if (/[",\\n\\r]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
+  return str;
+}
+
+function resultsToCsv() {
+  const lines = [resultsColumns.map(escapeCsvCell).join(',')];
+  for (const row of resultsRows) lines.push(row.map(escapeCsvCell).join(','));
+  return lines.join('\\r\\n') + '\\r\\n';
+}
+
+let copyCsvFlashTimeout = null;
+
+function flashCopyCsvButton(text) {
+  const btn = document.getElementById('copy-csv-btn');
+  if (copyCsvFlashTimeout) clearTimeout(copyCsvFlashTimeout);
+  const original = 'Copy CSV';
+  btn.textContent = text;
+  copyCsvFlashTimeout = setTimeout(() => {
+    btn.textContent = original;
+    copyCsvFlashTimeout = null;
+  }, 1200);
+}
+
+async function copyCsv() {
+  if (!resultsColumns.length) {
+    flashCopyCsvButton('Nothing to copy');
+    return;
+  }
+  const csv = resultsToCsv();
+  try {
+    await navigator.clipboard.writeText(csv);
+    flashCopyCsvButton('Copied!');
+  } catch (err) {
+    flashCopyCsvButton('Copy failed');
   }
 }
 
@@ -373,8 +1026,15 @@ function openConfirmModal(reason, onConfirm) {
       <button class="danger" id="confirm-ok">Run anyway</button>
     </div>
   </div></div>\`;
-  document.getElementById('confirm-cancel').onclick = () => { overlay.innerHTML = ''; };
-  document.getElementById('confirm-ok').onclick = () => { overlay.innerHTML = ''; onConfirm(); };
+  const close = () => { overlay.innerHTML = ''; document.removeEventListener('keydown', onKeydown, true); };
+  const run = () => { close(); onConfirm(); };
+  function onKeydown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  }
+  document.getElementById('confirm-cancel').onclick = close;
+  document.getElementById('confirm-ok').onclick = run;
+  document.addEventListener('keydown', onKeydown, true);
 }
 
 function openConnModal(id) {
@@ -489,10 +1149,7 @@ async function deleteConn(id) {
   await api(\`/api/connections/\${id}\`, { method: 'DELETE' });
   tablesCache.delete(id);
   expandedConns.delete(id);
-  if (activeConnId === id) {
-    activeConnId = null;
-    document.getElementById('results-wrap').innerHTML = '<div class="empty-state">Pick a connection to get started.</div>';
-  }
+  closeTab(id);
   await loadConnections();
 }
 
@@ -529,64 +1186,312 @@ function cachedTables() {
   return Array.isArray(cached) ? cached : [];
 }
 
-function tableCandidates() {
+function findTableInfo(name, pseudoTables) {
+  const lower = name.toLowerCase();
+  const real = cachedTables().find((t) => t.name.toLowerCase() === lower || (t.schema + '.' + t.name).toLowerCase() === lower);
+  if (real) return real;
+  return (pseudoTables || []).find((t) => t.name.toLowerCase() === lower) || null;
+}
+
+// ---- statement splitting (semicolon-aware, quote/comment/dollar-quote safe) ----
+
+function splitStatements(sql) {
+  const stmts = [];
+  let state = 'NORMAL';
+  let stmtStart = 0;
+  let dollarTag = null;
+  let blockDepth = 0;
+  const n = sql.length;
+  let i = 0;
+  while (i < n) {
+    const c = sql[i];
+    if (state === 'NORMAL') {
+      if (c === "'") { state = 'SINGLE'; i++; continue; }
+      if (c === '"') { state = 'DOUBLE'; i++; continue; }
+      if (c === '-' && sql[i + 1] === '-') { state = 'LINE'; i += 2; continue; }
+      if (c === '/' && sql[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; i += 2; continue; }
+      if (c === '$') {
+        const m = /^\\$[A-Za-z_]*\\$/.exec(sql.slice(i));
+        if (m) { dollarTag = m[0]; state = 'DOLLAR'; i += m[0].length; continue; }
+      }
+      if (c === ';') {
+        stmts.push({ start: stmtStart, end: i, text: sql.slice(stmtStart, i) });
+        stmtStart = i + 1;
+        i++;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (state === 'SINGLE') {
+      if (c === "'") {
+        if (sql[i + 1] === "'") { i += 2; continue; }
+        state = 'NORMAL'; i++; continue;
+      }
+      i++; continue;
+    }
+    if (state === 'DOUBLE') {
+      if (c === '"') {
+        if (sql[i + 1] === '"') { i += 2; continue; }
+        state = 'NORMAL'; i++; continue;
+      }
+      i++; continue;
+    }
+    if (state === 'LINE') {
+      if (c === '\\n') state = 'NORMAL';
+      i++; continue;
+    }
+    if (state === 'BLOCK') {
+      if (c === '/' && sql[i + 1] === '*') { blockDepth++; i += 2; continue; }
+      if (c === '*' && sql[i + 1] === '/') { blockDepth--; i += 2; if (blockDepth === 0) state = 'NORMAL'; continue; }
+      i++; continue;
+    }
+    if (state === 'DOLLAR') {
+      if (sql.startsWith(dollarTag, i)) { state = 'NORMAL'; i += dollarTag.length; dollarTag = null; continue; }
+      i++; continue;
+    }
+    i++;
+  }
+  stmts.push({ start: stmtStart, end: n, text: sql.slice(stmtStart, n) });
+  return stmts;
+}
+
+function statementAt(statements, pos) {
+  for (const s of statements) {
+    if (pos >= s.start && pos <= s.end) return s;
+  }
+  return statements[statements.length - 1] || { start: 0, end: 0, text: '' };
+}
+
+// Blanks out (space-fills, same length) string/comment/dollar-quote spans so a
+// regex tokenizer downstream doesn't get confused by SQL-looking text inside literals.
+function maskNonSql(text) {
+  const chars = text.split('');
+  let state = 'NORMAL';
+  let dollarTag = null;
+  let blockDepth = 0;
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (state === 'NORMAL') {
+      if (c === "'") { state = 'SINGLE'; chars[i] = ' '; i++; continue; }
+      if (c === '"') { state = 'DOUBLE'; chars[i] = ' '; i++; continue; }
+      if (c === '-' && text[i + 1] === '-') { state = 'LINE'; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
+      if (c === '/' && text[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
+      if (c === '$') {
+        const m = /^\\$[A-Za-z_]*\\$/.exec(text.slice(i));
+        if (m) {
+          dollarTag = m[0];
+          state = 'DOLLAR';
+          for (let k = 0; k < m[0].length; k++) chars[i + k] = ' ';
+          i += m[0].length;
+          continue;
+        }
+      }
+      i++;
+      continue;
+    }
+    if (state === 'SINGLE') {
+      chars[i] = ' ';
+      if (c === "'") {
+        if (text[i + 1] === "'") { chars[i + 1] = ' '; i += 2; continue; }
+        state = 'NORMAL'; i++; continue;
+      }
+      i++; continue;
+    }
+    if (state === 'DOUBLE') {
+      chars[i] = ' ';
+      if (c === '"') {
+        if (text[i + 1] === '"') { chars[i + 1] = ' '; i += 2; continue; }
+        state = 'NORMAL'; i++; continue;
+      }
+      i++; continue;
+    }
+    if (state === 'LINE') {
+      if (c === '\\n') { state = 'NORMAL'; i++; continue; }
+      chars[i] = ' '; i++; continue;
+    }
+    if (state === 'BLOCK') {
+      if (c === '/' && text[i + 1] === '*') { blockDepth++; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
+      if (c === '*' && text[i + 1] === '/') { blockDepth--; chars[i] = ' '; chars[i + 1] = ' '; i += 2; if (blockDepth === 0) state = 'NORMAL'; continue; }
+      chars[i] = ' '; i++; continue;
+    }
+    if (state === 'DOLLAR') {
+      if (text.startsWith(dollarTag, i)) {
+        for (let k = 0; k < dollarTag.length; k++) chars[i + k] = ' ';
+        state = 'NORMAL'; i += dollarTag.length; dollarTag = null; continue;
+      }
+      chars[i] = ' '; i++; continue;
+    }
+    i++;
+  }
+  return chars.join('');
+}
+
+function matchingParenEnd(text, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return text.length;
+}
+
+// ---- per-statement analysis: CTEs, FROM/JOIN tables, alias map ----
+
+const ALIAS_RE = /\\b(?:from|join)\\s+((?:[\\w]+\\.)?[\\w]+)\\s+(?:as\\s+)?([a-zA-Z_]\\w*)\\b/gi;
+const NOT_AN_ALIAS = /^(where|group|order|having|join|on|inner|left|right|full|cross|using|set|values|limit|offset|as)$/i;
+
+function extractCtes(maskedStmt) {
+  const ctes = [];
+  const head = /^\\s*with\\s+/i.exec(maskedStmt);
+  if (!head) return ctes;
+  let i = head[0].length;
+  while (true) {
+    const nameMatch = /^([a-zA-Z_]\\w*)/.exec(maskedStmt.slice(i));
+    if (!nameMatch) break;
+    const name = nameMatch[1];
+    i += nameMatch[0].length;
+    i += (/^\\s*/.exec(maskedStmt.slice(i)) || [''])[0].length;
+    if (maskedStmt[i] === '(') {
+      i = matchingParenEnd(maskedStmt, i) + 1;
+      i += (/^\\s*/.exec(maskedStmt.slice(i)) || [''])[0].length;
+    }
+    const asMatch = /^as\\s*/i.exec(maskedStmt.slice(i));
+    if (!asMatch) break;
+    i += asMatch[0].length;
+    if (maskedStmt[i] !== '(') break;
+    const bodyClose = matchingParenEnd(maskedStmt, i);
+    ctes.push(name.toLowerCase());
+    i = bodyClose + 1;
+    i += (/^\\s*/.exec(maskedStmt.slice(i)) || [''])[0].length;
+    if (maskedStmt[i] === ',') {
+      i++;
+      i += (/^\\s*/.exec(maskedStmt.slice(i)) || [''])[0].length;
+      continue;
+    }
+    break;
+  }
+  return ctes;
+}
+
+function analyzeStatement(stmtText) {
+  const masked = maskNonSql(stmtText);
+  const ctes = extractCtes(masked);
+  const pseudoTables = ctes.map((name) => ({ schema: '', name, columns: [] }));
+  const aliasMap = {};
+  for (const name of ctes) aliasMap[name] = name;
+  let m;
+  ALIAS_RE.lastIndex = 0;
+  while ((m = ALIAS_RE.exec(masked))) {
+    if (NOT_AN_ALIAS.test(m[2])) continue;
+    aliasMap[m[2].toLowerCase()] = m[1];
+  }
+  return { ctes, pseudoTables, aliasMap };
+}
+
+function tableCandidates(analysis) {
   const names = new Set();
   for (const t of cachedTables()) {
     names.add(t.name);
     names.add(t.schema + '.' + t.name);
   }
+  for (const t of (analysis ? analysis.pseudoTables : [])) names.add(t.name);
   return [...names];
 }
 
-function columnCandidates() {
-  const names = new Set();
-  for (const t of cachedTables()) for (const c of t.columns) names.add(c.name);
-  return [...names];
-}
-
-function findTableInfo(name) {
-  const lower = name.toLowerCase();
-  return cachedTables().find((t) => t.name.toLowerCase() === lower || (t.schema + '.' + t.name).toLowerCase() === lower) || null;
-}
-
-const ALIAS_RE = /\\b(?:from|join)\\s+((?:[\\w]+\\.)?[\\w]+)\\s+(?:as\\s+)?([a-zA-Z_]\\w*)\\b/gi;
-const NOT_AN_ALIAS = /^(where|group|order|having|join|on|inner|left|right|full|cross|using|set|values|limit|offset|as)$/i;
-
-function buildAliasMap(sql) {
-  const map = {};
-  let m;
-  ALIAS_RE.lastIndex = 0;
-  while ((m = ALIAS_RE.exec(sql))) {
-    if (NOT_AN_ALIAS.test(m[2])) continue;
-    map[m[2].toLowerCase()] = m[1];
+function referencedTables(analysis) {
+  const tables = [];
+  for (const alias of Object.keys(analysis.aliasMap)) {
+    const info = findTableInfo(analysis.aliasMap[alias], analysis.pseudoTables);
+    if (info) tables.push(info);
   }
-  return map;
+  return tables;
 }
 
-function resolveTableColumns(prefix, sql) {
+function columnCandidates(analysis) {
+  const refs = analysis ? referencedTables(analysis) : [];
+  const names = new Set();
+  if (refs.length) {
+    for (const t of refs) for (const c of t.columns) names.add(c.name);
+  } else {
+    for (const t of cachedTables()) for (const c of t.columns) names.add(c.name);
+  }
+  return [...names];
+}
+
+function resolveTableColumns(prefix, analysis) {
   if (!prefix) return null;
-  const aliasMap = buildAliasMap(sql);
-  const resolved = aliasMap[prefix.toLowerCase()] || prefix;
-  const info = findTableInfo(resolved);
+  const resolved = analysis.aliasMap[prefix.toLowerCase()] || prefix;
+  const info = findTableInfo(resolved, analysis.pseudoTables);
   return info ? info.columns.map((c) => c.name) : null;
 }
 
-const TABLE_CONTEXT_RE = /\\b(from|join|into|update)\\b/gi;
-const COLUMN_CONTEXT_RE = /\\b(select|where|and|or|on|set|by|having|values|when|case)\\b/gi;
+// ---- tokenizing + positional classification ----
 
-function lastMatchEnd(regex, text) {
-  regex.lastIndex = 0;
+function tokenize(maskedText) {
+  const TOKEN_RE = /\\b[A-Za-z_][A-Za-z0-9_]*\\b|<>|<=|>=|!=|[(),.;=<>]/g;
+  const tokens = [];
   let m;
-  let lastEnd = -1;
-  while ((m = regex.exec(text))) lastEnd = regex.lastIndex;
-  return lastEnd;
+  TOKEN_RE.lastIndex = 0;
+  while ((m = TOKEN_RE.exec(maskedText))) {
+    tokens.push({ text: m[0], start: m.index, end: m.index + m[0].length });
+  }
+  return tokens;
 }
 
-function classifyContext(before) {
-  const tableEnd = lastMatchEnd(TABLE_CONTEXT_RE, before);
-  const columnEnd = lastMatchEnd(COLUMN_CONTEXT_RE, before);
-  if (tableEnd === -1 && columnEnd === -1) return 'column';
-  return tableEnd > columnEnd ? 'table' : 'column';
+const CLAUSE_KEYWORDS = new Set(['select', 'from', 'join', 'where', 'and', 'or', 'on', 'set', 'by', 'having', 'values', 'when', 'case', 'into', 'update', 'with', 'group', 'order', 'limit', 'offset', 'returning', 'using', 'insert', 'delete']);
+const TABLE_KEYWORDS = new Set(['from', 'join', 'into', 'update']);
+
+function enclosingClauseIsTableList(tokens) {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const t = tokens[i].text.toLowerCase();
+    if (t === 'from' || t === 'join') return true;
+    if (['select', 'where', 'set', 'values', 'on', 'and', 'or', 'having'].includes(t)) return false;
+  }
+  return false;
+}
+
+function classifyPosition(tokens) {
+  if (!tokens.length) return 'clause-start';
+  const last = tokens[tokens.length - 1];
+  const lastLower = last.text.toLowerCase();
+  if (TABLE_KEYWORDS.has(lastLower)) return 'table';
+  if (CLAUSE_KEYWORDS.has(lastLower)) return 'column';
+  if (last.text === ',') return enclosingClauseIsTableList(tokens) ? 'table' : 'column';
+  if (last.text === '(') return 'clause-start';
+  if (/^[A-Za-z_]\\w*$/.test(last.text)) {
+    // a bare identifier was just completed — if it's sitting in a FROM/JOIN table
+    // list, the next thing is a clause keyword (JOIN/WHERE/...), not a comparison operator
+    return enclosingClauseIsTableList(tokens) ? 'table-cont' : 'operator';
+  }
+  return 'column';
+}
+
+// ---- candidate lists ----
+
+const KEYWORDS_CLAUSE_START = ['SELECT', 'INSERT INTO', 'UPDATE', 'DELETE FROM', 'WITH', 'EXPLAIN'];
+const KEYWORDS_AFTER_TABLE = ['JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'WHERE', 'ON', 'GROUP BY', 'ORDER BY', 'LIMIT', 'SET', 'VALUES', 'RETURNING'];
+const OPERATORS = ['=', '<>', '<', '>', '<=', '>=', 'LIKE', 'ILIKE', 'IN', 'IS NULL', 'IS NOT NULL', 'BETWEEN'];
+const KEYWORDS_CLAUSE_CONTINUATION = ['AND', 'OR'];
+
+function byPrefix(arr, word, kind) {
+  const w = word.toLowerCase();
+  return arr.filter((c) => c.toLowerCase().startsWith(w)).map((text) => ({ text, kind }));
+}
+
+function buildCandidates(position, word, analysis, tokens) {
+  if (position === 'clause-start') return byPrefix(KEYWORDS_CLAUSE_START, word, 'keyword');
+  if (position === 'table') return byPrefix(tableCandidates(analysis), word, 'table');
+  if (position === 'table-cont') return byPrefix(KEYWORDS_AFTER_TABLE, word, 'keyword');
+  if (position === 'operator') {
+    return [...byPrefix(OPERATORS, word, 'operator'), ...byPrefix(KEYWORDS_CLAUSE_CONTINUATION, word, 'keyword')];
+  }
+  return byPrefix(columnCandidates(analysis), word, 'column');
 }
 
 function currentWordRange(editor) {
@@ -606,14 +1511,59 @@ function hideAutocomplete() {
   box.innerHTML = '';
 }
 
+function createAcMirror(editor) {
+  let mirror = document.getElementById('ac-mirror');
+  if (!mirror) {
+    mirror = document.createElement('div');
+    mirror.id = 'ac-mirror';
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.wordWrap = 'break-word';
+    mirror.style.top = '0';
+    mirror.style.left = '0';
+    document.getElementById('editor-wrap').appendChild(mirror);
+  }
+  const style = getComputedStyle(editor);
+  ['fontFamily', 'fontSize', 'lineHeight', 'padding', 'border', 'boxSizing'].forEach((p) => {
+    mirror.style[p] = style[p];
+  });
+  mirror.style.width = editor.clientWidth + 'px';
+  return mirror;
+}
+
+function getCaretCoords(editor) {
+  const mirror = createAcMirror(editor);
+  mirror.textContent = editor.value.slice(0, editor.selectionStart);
+  const marker = document.createElement('span');
+  marker.textContent = '.';
+  mirror.appendChild(marker);
+  const style = getComputedStyle(editor);
+  const mirrorRect = mirror.getBoundingClientRect();
+  const markerRect = marker.getBoundingClientRect();
+  const editorRect = editor.getBoundingClientRect();
+  const lineHeight = parseFloat(style.lineHeight) || 16;
+  return {
+    left: markerRect.left - mirrorRect.left,
+    top: markerRect.top - mirrorRect.top + lineHeight - editor.scrollTop,
+  };
+}
+
 function showAutocomplete(matches) {
   acMatches = matches;
   acIndex = 0;
   const box = document.getElementById('autocomplete');
   box.innerHTML = matches
-    .map((m, i) => \`<div class="ac-item\${i === 0 ? ' active' : ''}" data-i="\${i}">\${escapeHtml(m)}</div>\`)
+    .map(
+      (m, i) =>
+        \`<div class="ac-item\${i === 0 ? ' active' : ''}" data-i="\${i}"><span class="ac-kind ac-kind-\${m.kind}">\${m.kind[0].toUpperCase()}</span><span class="ac-text">\${escapeHtml(m.text)}</span></div>\`,
+    )
     .join('');
   box.classList.add('show');
+  const editor = document.getElementById('editor');
+  const coords = getCaretCoords(editor);
+  box.style.left = coords.left + 'px';
+  box.style.top = coords.top + 'px';
   for (const el of box.querySelectorAll('.ac-item')) {
     el.onmousedown = (e) => {
       e.preventDefault();
@@ -625,7 +1575,7 @@ function showAutocomplete(matches) {
 function acceptAutocomplete(index) {
   const editor = document.getElementById('editor');
   const value = editor.value;
-  const replacement = acMatches[index];
+  const replacement = acMatches[index].text;
   editor.value = value.slice(0, acStart) + replacement + value.slice(acEnd);
   const cursor = acStart + replacement.length;
   editor.setSelectionRange(cursor, cursor);
@@ -635,25 +1585,32 @@ function acceptAutocomplete(index) {
 
 function handleEditorInput() {
   const editor = document.getElementById('editor');
+  if (activeConnId && tabState.has(activeConnId)) tabState.get(activeConnId).sql = editor.value;
   const { start, end, word } = currentWordRange(editor);
   if (!word) {
     hideAutocomplete();
     return;
   }
 
-  const dotIdx = word.lastIndexOf('.');
-  const context = classifyContext(editor.value.slice(0, start));
+  const statements = splitStatements(editor.value);
+  const stmt = statementAt(statements, start);
+  const analysis = analyzeStatement(stmt.text);
 
+  const beforeCursorInStmt = editor.value.slice(stmt.start, start);
+  const tokens = tokenize(maskNonSql(beforeCursorInStmt));
+  const position = classifyPosition(tokens);
+
+  const dotIdx = word.lastIndexOf('.');
   let matches;
-  if (dotIdx >= 0 && context !== 'table') {
+  if (dotIdx >= 0 && position !== 'table') {
     const prefix = word.slice(0, dotIdx);
     const colPrefix = word.slice(dotIdx + 1);
-    const cols = resolveTableColumns(prefix, editor.value) ?? [];
-    matches = cols.filter((c) => c.toLowerCase().startsWith(colPrefix.toLowerCase())).map((c) => prefix + '.' + c);
-  } else if (context === 'table') {
-    matches = tableCandidates().filter((c) => c.toLowerCase().startsWith(word.toLowerCase()));
+    const cols = resolveTableColumns(prefix, analysis) ?? [];
+    matches = cols
+      .filter((c) => c.toLowerCase().startsWith(colPrefix.toLowerCase()))
+      .map((c) => ({ text: prefix + '.' + c, kind: 'column' }));
   } else {
-    matches = columnCandidates().filter((c) => c.toLowerCase().startsWith(word.toLowerCase()));
+    matches = buildCandidates(position, word, analysis, tokens);
   }
 
   matches = matches.slice(0, 8);

@@ -35,6 +35,30 @@ function isReconnectable(err: any): boolean {
   return RECONNECTABLE_CODES.has(err?.code) || RECONNECTABLE_MESSAGE.test(err?.message ?? "");
 }
 
+export interface QueryErrorInfo {
+  message: string;
+  code?: string;
+  sqlState?: string;
+  detail?: string;
+  hint?: string;
+  severity?: string;
+  position?: number;
+}
+
+export function toQueryError(err: any): QueryErrorInfo {
+  const posRaw = err?.position;
+  const position = posRaw != null && posRaw !== "" && !Number.isNaN(Number(posRaw)) ? Number(posRaw) : undefined;
+  return {
+    message: err?.message ?? String(err),
+    code: err?.code,
+    sqlState: err?.errno,
+    detail: err?.detail,
+    hint: err?.hint,
+    severity: err?.severity,
+    position,
+  };
+}
+
 async function withReconnect<T>(conn: Connection, fn: (client: SQL) => Promise<T>): Promise<T> {
   const client = clientFor(conn);
   try {
@@ -120,6 +144,105 @@ export async function listTables(conn: Connection): Promise<TableInfo[]> {
 
 function quoteIdent(ident: string): string {
   return '"' + ident.replace(/"/g, '""') + '"';
+}
+
+const SINGLE_TABLE_SELECT = /^\s*select\b[\s\S]+?\bfrom\s+("[^"]+"|[\w]+)(?:\s*\.\s*("[^"]+"|[\w]+))?/i;
+const DISQUALIFYING = /\bjoin\b|\bunion\b/i;
+
+function unquoteIdent(s: string): string {
+  return s.replace(/^"|"$/g, "");
+}
+
+export function detectSourceTable(sql: string): { schemaRef?: string; table: string } | null {
+  if (DISQUALIFYING.test(sql)) return null;
+  const m = SINGLE_TABLE_SELECT.exec(sql);
+  if (!m) return null;
+  if (m[2]) return { schemaRef: unquoteIdent(m[1]), table: unquoteIdent(m[2]) };
+  return { table: unquoteIdent(m[1]) };
+}
+
+export async function resolveTable(
+  conn: Connection,
+  ref: { schemaRef?: string; table: string },
+): Promise<{ schema: string; table: string } | null> {
+  return withReconnect(conn, async (client) => {
+    if (ref.schemaRef) {
+      const rows = await client`
+        select 1 from information_schema.tables
+        where table_schema = ${ref.schemaRef} and table_name = ${ref.table}
+      `;
+      return rows.length ? { schema: ref.schemaRef, table: ref.table } : null;
+    }
+    const rows = (await client`
+      select table_schema from information_schema.tables
+      where table_name = ${ref.table} and table_schema not in ('pg_catalog', 'information_schema')
+    `) as any[];
+    return rows.length === 1 ? { schema: rows[0].table_schema, table: ref.table } : null;
+  });
+}
+
+export async function getPrimaryKeyColumns(conn: Connection, schema: string, table: string): Promise<string[]> {
+  const rows = await withReconnect(
+    conn,
+    (client) => client`
+      select kcu.column_name as col
+      from information_schema.table_constraints tc
+      join information_schema.key_column_usage kcu
+        on tc.constraint_name = kcu.constraint_name and tc.table_schema = kcu.table_schema
+      where tc.constraint_type = 'PRIMARY KEY' and tc.table_schema = ${schema} and tc.table_name = ${table}
+      order by kcu.ordinal_position
+    `,
+  );
+  return (rows as any[]).map((r) => r.col);
+}
+
+export interface EditInfo {
+  schema: string;
+  table: string;
+  pkColumns: string[];
+}
+
+export async function detectEditInfo(conn: Connection, sql: string, columns: string[]): Promise<EditInfo | null> {
+  const ref = detectSourceTable(sql);
+  if (!ref) return null;
+  const resolved = await resolveTable(conn, ref);
+  if (!resolved) return null;
+  const pkColumns = await getPrimaryKeyColumns(conn, resolved.schema, resolved.table);
+  if (!pkColumns.length || !pkColumns.every((pk) => columns.includes(pk))) return null;
+  return { schema: resolved.schema, table: resolved.table, pkColumns };
+}
+
+export async function updateCell(
+  conn: Connection,
+  schema: string,
+  table: string,
+  pk: { column: string; value: unknown }[],
+  column: string,
+  value: unknown,
+): Promise<number> {
+  const setClause = `${quoteIdent(column)} = $1`;
+  const whereClause = pk.map((p, i) => `${quoteIdent(p.column)} = $${i + 2}`).join(" and ");
+  const text = `update ${quoteIdent(schema)}.${quoteIdent(table)} set ${setClause} where ${whereClause}`;
+  const params = [value, ...pk.map((p) => p.value)];
+  const res = await withReconnect(conn, (client) => client.unsafe(text, params));
+  return (res as any)?.count ?? 0;
+}
+
+export async function insertRow(
+  conn: Connection,
+  schema: string,
+  table: string,
+  values: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const cols = Object.keys(values);
+  if (!cols.length) throw new Error("No values provided");
+  const colList = cols.map(quoteIdent).join(", ");
+  const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+  const text = `insert into ${quoteIdent(schema)}.${quoteIdent(table)} (${colList}) values (${placeholders}) returning *`;
+  const params = cols.map((c) => values[c]);
+  const res = await withReconnect(conn, (client) => client.unsafe(text, params));
+  const rows = Array.isArray(res) ? (res as any[]) : [];
+  return (rows[0] as Record<string, unknown>) ?? {};
 }
 
 export async function previewTable(

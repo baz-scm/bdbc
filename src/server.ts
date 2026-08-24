@@ -6,7 +6,17 @@ import {
   deleteConnection,
   type Connection,
 } from "./store";
-import { testConnection, runQuery, listTables, isDestructive, dropClient } from "./db";
+import {
+  testConnection,
+  runQuery,
+  listTables,
+  isDestructive,
+  dropClient,
+  detectEditInfo,
+  updateCell,
+  insertRow,
+  toQueryError,
+} from "./db";
 import { toCsv } from "./csv";
 import { html } from "./ui";
 import pkg from "../package.json";
@@ -64,6 +74,10 @@ function json(data: unknown, init?: ResponseInit): Response {
 
 function error(message: string, status = 400): Response {
   return json({ error: message }, { status });
+}
+
+function queryError(err: any, status = 400): Response {
+  return json({ error: toQueryError(err) }, { status });
 }
 
 async function readJson(req: Request): Promise<any> {
@@ -178,7 +192,36 @@ Bun.serve({
         }
         try {
           const result = await runQuery(conn, sql);
-          return json(result);
+          const edit = await detectEditInfo(conn, sql, result.columns).catch(() => null);
+          return json({ ...result, edit });
+        } catch (err: any) {
+          return queryError(err);
+        }
+      }
+
+      if (sub === "/update-cell" && method === "POST") {
+        const body = await readJson(req);
+        const { schema, table, pk, column, value } = body ?? {};
+        if (!schema || !table || !Array.isArray(pk) || !pk.length || !column) {
+          return error("Missing schema, table, pk or column");
+        }
+        try {
+          const rowCount = await updateCell(conn, schema, table, pk, column, value);
+          return json({ ok: true, rowCount });
+        } catch (err: any) {
+          return error(err?.message ?? String(err), 400);
+        }
+      }
+
+      if (sub === "/insert-row" && method === "POST") {
+        const body = await readJson(req);
+        const { schema, table, values } = body ?? {};
+        if (!schema || !table || !values || typeof values !== "object" || !Object.keys(values).length) {
+          return error("Missing schema, table or values");
+        }
+        try {
+          const row = await insertRow(conn, schema, table, values);
+          return json({ row });
         } catch (err: any) {
           return error(err?.message ?? String(err), 400);
         }
@@ -198,7 +241,7 @@ Bun.serve({
             },
           });
         } catch (err: any) {
-          return error(err?.message ?? String(err), 400);
+          return queryError(err);
         }
       }
     }
