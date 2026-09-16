@@ -245,6 +245,19 @@ export async function insertRow(
   return (rows[0] as Record<string, unknown>) ?? {};
 }
 
+export async function deleteRow(
+  conn: Connection,
+  schema: string,
+  table: string,
+  pk: { column: string; value: unknown }[],
+): Promise<number> {
+  const whereClause = pk.map((p, i) => `${quoteIdent(p.column)} = $${i + 1}`).join(" and ");
+  const text = `delete from ${quoteIdent(schema)}.${quoteIdent(table)} where ${whereClause}`;
+  const params = pk.map((p) => p.value);
+  const res = await withReconnect(conn, (client) => client.unsafe(text, params));
+  return (res as any)?.count ?? 0;
+}
+
 export async function previewTable(
   conn: Connection,
   schema: string,

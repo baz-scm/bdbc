@@ -15,6 +15,7 @@ import {
   detectEditInfo,
   updateCell,
   insertRow,
+  deleteRow,
   toQueryError,
 } from "./db";
 import { toCsv } from "./csv";
@@ -207,6 +208,20 @@ Bun.serve({
         }
         try {
           const rowCount = await updateCell(conn, schema, table, pk, column, value);
+          return json({ ok: true, rowCount });
+        } catch (err: any) {
+          return error(err?.message ?? String(err), 400);
+        }
+      }
+
+      if (sub === "/delete-row" && method === "POST") {
+        const body = await readJson(req);
+        const { schema, table, pk } = body ?? {};
+        if (!schema || !table || !Array.isArray(pk) || !pk.length) {
+          return error("Missing schema, table or pk");
+        }
+        try {
+          const rowCount = await deleteRow(conn, schema, table, pk);
           return json({ ok: true, rowCount });
         } catch (err: any) {
           return error(err?.message ?? String(err), 400);
