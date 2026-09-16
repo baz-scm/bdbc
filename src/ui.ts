@@ -80,13 +80,29 @@ export const html = /* html */ `<!doctype html>
   table.grid th, table.grid td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; white-space: nowrap; max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
   table.grid th { background: var(--bg3); position: sticky; top: 0; color: var(--text-dim); }
   table.grid td.null { color: var(--text-dim); font-style: italic; }
-  table.grid tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  table.grid tr.alt td { background: rgba(255,255,255,0.02); }
+  table.grid tr.filtered-out { display: none; }
+  table.grid th { min-width: 110px; vertical-align: top; }
+  .th-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .filter-wrap { position: relative; margin-top: 4px; display: flex; align-items: center; }
+  #results-wrap.filters-hidden .filter-wrap { display: none; }
+  .filter-icon { position: absolute; left: 4px; font-size: 10px; line-height: 1; color: var(--text-dim); pointer-events: none; }
+  .col-filter { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px dashed var(--border); color: var(--text); border-radius: 3px; padding: 1px 14px 1px 15px; font-family: var(--mono); font-size: 11px; font-weight: normal; }
+  .col-filter::placeholder { color: var(--text-dim); font-style: italic; }
+  .col-filter:focus { outline: none; border: 1px solid var(--accent); }
+  .col-filter.active { border: 1px solid var(--accent); color: var(--accent); }
+  .filter-clear { position: absolute; right: 2px; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; display: none; }
+  .col-filter.active ~ .filter-clear { display: block; }
+  .filter-clear:hover { color: var(--text); }
+  button.secondary.toggled { border-color: var(--accent); color: var(--accent); }
   table.grid td { cursor: cell; }
   table.grid td.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
   table.grid td.editing { outline: 2px solid var(--success); outline-offset: -2px; background: var(--bg2); white-space: normal; cursor: text; }
   table.grid td.saving { opacity: 0.6; }
   table.grid td.save-error { outline: 2px solid var(--danger); }
   table.grid tr.new-row td { background: var(--active-bg); cursor: text; white-space: normal; }
+  table.grid tr.pending-delete td { text-decoration: line-through; background: rgba(194,59,59,0.15); color: var(--danger); }
+  table.grid tr.pending-delete.saving td { opacity: 0.6; }
   table.grid tr.new-row.saving td { opacity: 0.6; }
   #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 10; }
   #overlay.show { display: flex; }
@@ -127,6 +143,9 @@ export const html = /* html */ `<!doctype html>
       <button class="secondary" id="explain-btn" onclick="runQuery(false, true)">Explain</button>
       <button class="secondary" id="export-btn" onclick="exportCsv()">Export CSV</button>
       <button class="secondary" id="copy-csv-btn" onclick="copyCsv()">Copy CSV</button>
+      <button class="secondary toggled" id="toggle-filters-btn" onclick="toggleFilters()" title="Show/hide the per-column filter boxes (Cmd/Ctrl+F)">Filters</button>
+      <button class="secondary" id="clear-filters-btn" onclick="clearFilters()" style="display:none">Clear filters</button>
+      <span id="filter-status"></span>
       <span id="status"></span>
     </div>
     <div id="editor-wrap">
@@ -501,10 +520,12 @@ function renderQueryError(err, editorSql) {
 let resultsEditInfo = null;
 let resultsColumns = [];
 let resultsRows = [];
+let resultsFilters = [];
 let editingCell = null;
 let editingOriginalText = '';
 let selectedCell = null;
 let pendingRow = null;
+let pendingDeleteRow = null;
 
 function ensureTablesLoaded(connId) {
   if (tablesCache.has(connId)) return;
@@ -550,9 +571,12 @@ function resetResultsState() {
   resultsEditInfo = null;
   resultsColumns = [];
   resultsRows = [];
+  resultsFilters = [];
+  visibleRowIndices = null;
   editingCell = null;
   selectedCell = null;
   pendingRow = null;
+  pendingDeleteRow = null;
 }
 
 function renderResults(result) {
@@ -569,11 +593,58 @@ function renderResults(result) {
   const table = document.createElement('table');
   table.className = 'grid';
   const thead = document.createElement('tr');
-  for (const col of result.columns) {
+  thead.className = 'head-row';
+  resultsFilters = result.columns.map(() => '');
+  result.columns.forEach((col, colIndex) => {
     const th = document.createElement('th');
-    th.textContent = col;
+    const label = document.createElement('div');
+    label.className = 'th-label';
+    label.textContent = col;
+    label.title = col;
+    const wrap2 = document.createElement('div');
+    wrap2.className = 'filter-wrap';
+    const icon = document.createElement('span');
+    icon.className = 'filter-icon';
+    icon.textContent = '\u2315';
+    const input = document.createElement('input');
+    input.className = 'col-filter';
+    input.type = 'text';
+    input.placeholder = 'Filter ' + col;
+    input.title = 'Filter rows by ' + col + '. Substring by default; !text excludes; =, !=, >, >=, <, <= compare (numeric when both sides are numbers).';
+    input.dataset.col = String(colIndex);
+    input.addEventListener('input', () => {
+      resultsFilters[colIndex] = input.value;
+      input.classList.toggle('active', !!input.value.trim());
+      applyFilters();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && input.value) {
+        e.preventDefault();
+        e.stopPropagation();
+        input.value = '';
+        resultsFilters[colIndex] = '';
+        input.classList.remove('active');
+        applyFilters();
+      }
+    });
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'filter-clear';
+    clearBtn.type = 'button';
+    clearBtn.title = 'Clear this filter';
+    clearBtn.textContent = '\u00d7';
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      resultsFilters[colIndex] = '';
+      input.classList.remove('active');
+      applyFilters();
+    });
+    wrap2.appendChild(icon);
+    wrap2.appendChild(input);
+    wrap2.appendChild(clearBtn);
+    th.appendChild(label);
+    th.appendChild(wrap2);
     thead.appendChild(th);
-  }
+  });
   table.appendChild(thead);
   result.rows.forEach((row, rowIndex) => {
     const tr = document.createElement('tr');
@@ -590,6 +661,102 @@ function renderResults(result) {
   });
   wrap.innerHTML = '';
   wrap.appendChild(table);
+  applyFilters();
+}
+
+function matchFilter(text, q) {
+  const lower = text.toLowerCase();
+  const m = q.match(/^(>=|<=|!=|<>|>|<|=)\\s*(.*)$/);
+  if (m) {
+    const op = m[1];
+    const rhs = m[2].trim();
+    const a = Number(text);
+    const b = Number(rhs);
+    if (rhs !== '' && text.trim() !== '' && !Number.isNaN(a) && !Number.isNaN(b)) {
+      if (op === '>') return a > b;
+      if (op === '>=') return a >= b;
+      if (op === '<') return a < b;
+      if (op === '<=') return a <= b;
+      if (op === '=') return a === b;
+      return a !== b;
+    }
+    if (op === '=') return lower === rhs.toLowerCase();
+    if (op === '!=' || op === '<>') return lower !== rhs.toLowerCase();
+    return lower.includes(q.toLowerCase());
+  }
+  if (q.startsWith('!')) return !lower.includes(q.slice(1).toLowerCase());
+  return lower.includes(q.toLowerCase());
+}
+
+function activeFilters() {
+  return resultsFilters
+    .map((f, colIndex) => ({ colIndex, q: (f || '').trim() }))
+    .filter((f) => f.q);
+}
+
+function rowMatchesFilters(tr, filters) {
+  return filters.every((f) => {
+    const td = tr.cells[f.colIndex];
+    return td ? matchFilter(td.textContent, f.q) : false;
+  });
+}
+
+let visibleRowIndices = null;
+
+function applyFilters() {
+  const table = document.querySelector('#results-wrap table.grid');
+  if (!table) return;
+  const filters = activeFilters();
+  visibleRowIndices = filters.length ? new Set() : null;
+  let shown = 0;
+  let total = 0;
+  for (const tr of table.rows) {
+    if (tr.classList.contains('head-row') || tr.classList.contains('new-row')) continue;
+    total++;
+    let show = rowMatchesFilters(tr, filters);
+    if (!show && ((editingCell && tr.contains(editingCell)) || (pendingDeleteRow && pendingDeleteRow.tr === tr))) {
+      show = true;
+    }
+    tr.classList.toggle('filtered-out', !show);
+    if (show) {
+      tr.classList.toggle('alt', shown % 2 === 1);
+      shown++;
+      if (visibleRowIndices) visibleRowIndices.add(Number(tr.cells[0].dataset.row));
+    } else {
+      tr.classList.remove('alt');
+    }
+  }
+  const status = document.getElementById('filter-status');
+  const btn = document.getElementById('clear-filters-btn');
+  if (filters.length) {
+    status.textContent = \`Showing \${shown} of \${total} rows\`;
+    btn.style.display = '';
+  } else {
+    status.textContent = '';
+    btn.style.display = 'none';
+  }
+}
+
+function toggleFilters() {
+  const wrap = document.getElementById('results-wrap');
+  const hidden = wrap.classList.toggle('filters-hidden');
+  document.getElementById('toggle-filters-btn').classList.toggle('toggled', !hidden);
+  if (hidden) clearFilters();
+  else focusFirstFilter();
+}
+
+function focusFirstFilter() {
+  const input = document.querySelector('#results-wrap .col-filter');
+  if (input) input.focus();
+}
+
+function clearFilters() {
+  resultsFilters = resultsFilters.map(() => '');
+  for (const input of document.querySelectorAll('#results-wrap .col-filter')) {
+    input.value = '';
+    input.classList.remove('active');
+  }
+  applyFilters();
 }
 
 function setCellDisplay(td, cell) {
@@ -613,6 +780,18 @@ function selectAllText(el) {
   sel.addRange(range);
 }
 
+function inConfirmOverlay(el) {
+  if (!el || typeof el.closest !== 'function') return false;
+  return !!el.closest('#overlay-confirm');
+}
+
+function isTextEntry(el) {
+  if (!el || el.nodeType !== 1) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 function selectCell(td) {
   if (editingCell) return;
   if (selectedCell) selectedCell.classList.remove('selected');
@@ -630,6 +809,10 @@ function startEdit(td, rowIndex, colIndex) {
   if (!resultsEditInfo) {
     document.getElementById('status').textContent =
       "Not editable: query must be a simple single-table select whose results include the table's primary key.";
+    return;
+  }
+  if (pendingDeleteRow) {
+    showUnsavedDeleteWarning();
     return;
   }
   if (selectedCell) { selectedCell.classList.remove('selected'); selectedCell = null; }
@@ -733,6 +916,114 @@ async function saveEdit() {
   }
 }
 
+function renumberResultRows() {
+  const table = document.querySelector('#results-wrap table.grid');
+  if (!table) return;
+  const rows = Array.from(table.querySelectorAll('tr')).filter((tr) => !tr.classList.contains('new-row'));
+  rows.shift(); // header row
+  rows.forEach((tr, rowIndex) => {
+    Array.from(tr.children).forEach((td) => { td.dataset.row = String(rowIndex); });
+  });
+}
+
+function hasUnsavedDelete() {
+  return !!pendingDeleteRow;
+}
+
+function markRowPendingDelete(td) {
+  if (editingCell || pendingRow) return;
+  if (!resultsEditInfo) {
+    document.getElementById('status').textContent =
+      "Can't delete: this result isn't tied to an editable table.";
+    return;
+  }
+  const tr = td.parentElement;
+  if (pendingDeleteRow && pendingDeleteRow.tr === tr) return;
+  if (pendingDeleteRow && pendingDeleteRow.tr !== tr) {
+    showUnsavedDeleteWarning(() => markRowPendingDelete(td));
+    return;
+  }
+  pendingDeleteRow = { tr, rowIndex: Number(td.dataset.row) };
+  tr.classList.add('pending-delete');
+  document.getElementById('status').textContent = 'Row marked for deletion — Cmd+Enter to delete, Esc to undo.';
+}
+
+function cancelPendingDelete() {
+  if (!pendingDeleteRow) return;
+  pendingDeleteRow.tr.classList.remove('pending-delete');
+  pendingDeleteRow = null;
+  document.getElementById('status').textContent = '';
+}
+
+async function commitPendingDelete() {
+  if (!pendingDeleteRow) return;
+  const { tr, rowIndex } = pendingDeleteRow;
+  const row = resultsRows[rowIndex];
+  const pk = resultsEditInfo.pkColumns.map((pkCol) => ({
+    column: pkCol,
+    value: row[resultsColumns.indexOf(pkCol)],
+  }));
+  tr.classList.add('saving');
+  document.getElementById('status').textContent = 'Deleting…';
+  try {
+    const res = await api(\`/api/connections/\${activeConnId}/delete-row\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema: resultsEditInfo.schema, table: resultsEditInfo.table, pk }),
+    });
+    if (!res.rowCount) {
+      tr.classList.remove('saving');
+      document.getElementById('status').textContent = 'Delete failed: no rows matched — the row may have changed underneath you.';
+      return;
+    }
+    tr.remove();
+    resultsRows.splice(rowIndex, 1);
+    renumberResultRows();
+    pendingDeleteRow = null;
+    selectedCell = null;
+    applyFilters();
+    document.getElementById('status').textContent = \`Deleted (\${res.rowCount} row\${res.rowCount === 1 ? '' : 's'}).\`;
+  } catch (err) {
+    tr.classList.remove('saving');
+    document.getElementById('status').textContent = 'Delete failed: ' + err.message;
+  }
+}
+
+let closeDeleteWarning = null;
+
+function showUnsavedDeleteWarning(onProceed) {
+  if (!pendingDeleteRow) { if (onProceed) onProceed(); return; }
+  if (closeDeleteWarning) closeDeleteWarning();
+  const overlay = document.getElementById('overlay-confirm');
+  overlay.innerHTML = \`<div id="overlay" class="show"><div class="modal">
+    <h2>Unsaved row deletion</h2>
+    <p style="font-size:12px;color:var(--text-dim)">A row is marked for deletion. Press Cmd+Enter to delete it, or undo the mark.</p>
+    <div class="actions">
+      <button class="secondary" id="warn-keep">Keep mark</button>
+      <button class="danger" id="warn-discard">Undo mark</button>
+    </div>
+  </div></div>\`;
+  const close = () => {
+    overlay.innerHTML = '';
+    document.removeEventListener('keydown', onKeydown, true);
+    closeDeleteWarning = null;
+  };
+  closeDeleteWarning = close;
+  function onKeydown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      close();
+      commitPendingDelete();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  }
+  document.getElementById('warn-keep').onclick = () => { close(); };
+  document.getElementById('warn-discard').onclick = () => { close(); cancelPendingDelete(); if (onProceed) onProceed(); };
+  document.addEventListener('keydown', onKeydown, true);
+}
+
 function hasUnsavedNewRow() {
   return !!pendingRow && pendingRow.touched.some(Boolean);
 }
@@ -741,6 +1032,10 @@ function startNewRow() {
   if (!resultsEditInfo) {
     document.getElementById('status').textContent =
       "Can't add a row: this result isn't tied to an editable table.";
+    return;
+  }
+  if (pendingDeleteRow) {
+    showUnsavedDeleteWarning();
     return;
   }
   if (editingCell && isCellDirty()) {
@@ -906,16 +1201,22 @@ function showUnsavedEditWarning() {
 }
 
 document.addEventListener('mousedown', (e) => {
+  if (inConfirmOverlay(e.target)) return;
   if (editingCell && !editingCell.contains(e.target) && isCellDirty()) {
     e.preventDefault();
     return;
   }
   if (pendingRow && !pendingRow.tr.contains(e.target) && hasUnsavedNewRow()) {
     e.preventDefault();
+    return;
+  }
+  if (pendingDeleteRow && !pendingDeleteRow.tr.contains(e.target)) {
+    e.preventDefault();
   }
 }, true);
 
 document.addEventListener('click', (e) => {
+  if (inConfirmOverlay(e.target)) return;
   if (editingCell && !editingCell.contains(e.target)) {
     if (!isCellDirty()) {
       exitEditState();
@@ -934,16 +1235,59 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     showUnsavedRowWarning();
+    return;
+  }
+  if (pendingDeleteRow && !pendingDeleteRow.tr.contains(e.target)) {
+    e.preventDefault();
+    e.stopPropagation();
+    showUnsavedDeleteWarning();
   }
 }, true);
 
 document.addEventListener('keydown', (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'f') return;
+  if (!document.querySelector('#results-wrap .col-filter')) return;
+  e.preventDefault();
+  const wrap = document.getElementById('results-wrap');
+  if (wrap.classList.contains('filters-hidden')) toggleFilters();
+  else focusFirstFilter();
+}, true);
+
+document.addEventListener('keydown', (e) => {
   if (!e.ctrlKey || e.key.toLowerCase() !== 'n') return;
+  if (isTextEntry(e.target) && e.target !== selectedCell) return;
   if (document.getElementById('overlay').classList.contains('show')) return;
   if (document.getElementById('overlay-confirm').innerHTML.trim()) return;
   if (!activeConnId) return;
   e.preventDefault();
   startNewRow();
+}, true);
+
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('overlay').classList.contains('show')) return;
+  if (document.getElementById('overlay-confirm').innerHTML.trim()) return;
+  if (isTextEntry(e.target) && !(selectedCell && selectedCell === e.target)) return;
+  if ((e.key === 'Backspace' || e.key === 'Delete') && selectedCell && !editingCell) {
+    e.preventDefault();
+    markRowPendingDelete(selectedCell);
+    return;
+  }
+  if (pendingDeleteRow) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      commitPendingDelete();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelPendingDelete();
+    }
+  }
+}, true);
+
+document.addEventListener('copy', (e) => {
+  if (!selectedCell || editingCell) return;
+  if (isTextEntry(e.target) && e.target !== selectedCell) return;
+  e.preventDefault();
+  e.clipboardData.setData('text/plain', selectedCell.textContent);
 }, true);
 
 async function exportCsv() {
@@ -985,7 +1329,10 @@ function escapeCsvCell(value) {
 
 function resultsToCsv() {
   const lines = [resultsColumns.map(escapeCsvCell).join(',')];
-  for (const row of resultsRows) lines.push(row.map(escapeCsvCell).join(','));
+  resultsRows.forEach((row, rowIndex) => {
+    if (visibleRowIndices && !visibleRowIndices.has(rowIndex)) return;
+    lines.push(row.map(escapeCsvCell).join(','));
+  });
   return lines.join('\\r\\n') + '\\r\\n';
 }
 
@@ -1016,10 +1363,10 @@ async function copyCsv() {
   }
 }
 
-function openConfirmModal(reason, onConfirm) {
+function openConfirmModal(reason, onConfirm, title) {
   const overlay = document.getElementById('overlay-confirm');
   overlay.innerHTML = \`<div id="overlay" class="show"><div class="modal">
-    <h2>Confirm destructive query</h2>
+    <h2>\${escapeHtml(title || 'Confirm destructive query')}</h2>
     <p style="font-size:12px;color:var(--text-dim)">\${escapeHtml(reason)}</p>
     <div class="actions">
       <button class="secondary" id="confirm-cancel">Cancel</button>
