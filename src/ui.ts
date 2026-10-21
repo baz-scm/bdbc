@@ -2064,10 +2064,13 @@ let paramsCache = { params: {}, errors: [] };
 // One pending save per connection: switching tabs mid-edit must not cancel the
 // save the connection we just left had queued.
 const pendingParamSaves = new Map(); // connId -> { text, id: timeout id }
-// Text that no response has confirmed yet, whether it is still waiting on the
+// The edit no response has confirmed yet, whether it is still waiting on the
 // debounce or already in flight. An ordinary PUT is not keepalive, so the unload
-// can abort it; this is what the unload handler resends.
-const unconfirmedParams = new Map(); // connId -> text
+// can abort it; this is what the unload handler resends. Each edit carries a token,
+// because comparing the text alone would let a late reply to an older request clear
+// a newer edit that happens to read the same.
+const unconfirmedParams = new Map(); // connId -> { text, token }
+let paramsSaveToken = 0;
 const paramsSaveFailed = new Set(); // connIds whose last save did not land
 
 function parseParamsText(text) {
@@ -2293,7 +2296,7 @@ function refreshParams(includeCaretWord) {
 
 // keepalive is only for the beforeunload flush: it has a 64 KiB budget shared across
 // in-flight requests, which an ordinary save has no reason to spend.
-async function saveParams(connId, text, keepalive) {
+async function saveParams(connId, text, token, keepalive) {
   try {
     const res = await fetch(\`/api/connections/\${connId}/params\`, {
       method: 'PUT',
@@ -2303,7 +2306,8 @@ async function saveParams(connId, text, keepalive) {
     });
     if (!res.ok) throw new Error(res.statusText);
     // Only clear it if nothing newer was typed while this request was out.
-    if (unconfirmedParams.get(connId) === text) unconfirmedParams.delete(connId);
+    const unconfirmed = unconfirmedParams.get(connId);
+    if (unconfirmed && unconfirmed.token === token) unconfirmedParams.delete(connId);
     paramsSaveFailed.delete(connId);
   } catch (err) {
     // The edit only lives in memory until a save lands, so say so rather than
@@ -2318,7 +2322,7 @@ function flushParamsSave(connId, keepalive) {
   if (!pending) return;
   clearTimeout(pending.id);
   pendingParamSaves.delete(connId);
-  saveParams(connId, pending.text, keepalive);
+  saveParams(connId, pending.text, pending.token, keepalive);
 }
 
 function saveParamsSoon() {
@@ -2328,14 +2332,16 @@ function saveParamsSoon() {
   if (tabState.has(connId)) tabState.get(connId).params = text;
   const conn = connections.find((c) => c.id === connId);
   if (conn) conn.params = text;
-  unconfirmedParams.set(connId, text);
+  const token = ++paramsSaveToken;
+  unconfirmedParams.set(connId, { text, token });
   const pending = pendingParamSaves.get(connId);
   if (pending) clearTimeout(pending.id);
   pendingParamSaves.set(connId, {
     text,
+    token,
     id: setTimeout(() => {
       pendingParamSaves.delete(connId);
-      saveParams(connId, text);
+      saveParams(connId, text, token);
     }, 400),
   });
 }
@@ -2403,8 +2409,8 @@ window.addEventListener('beforeunload', () => {
     flushParamsSave(connId, true);
     sent.add(connId);
   }
-  for (const [connId, text] of [...unconfirmedParams]) {
-    if (!sent.has(connId)) saveParams(connId, text, true);
+  for (const [connId, unconfirmed] of [...unconfirmedParams]) {
+    if (!sent.has(connId)) saveParams(connId, unconfirmed.text, unconfirmed.token, true);
   }
 });
 
