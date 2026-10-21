@@ -58,8 +58,29 @@ export const html = /* html */ `<!doctype html>
   .tab-close:hover { background: rgba(128,128,128,0.25); }
   #toolbar { display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); align-items: center; }
   .conn-badge { display: none; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; padding: 4px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  #params-panel { display: none; padding: 8px 8px 0; }
+  #params-panel.show { display: block; }
+  .params-head { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600; }
+  #params-status { text-transform: none; letter-spacing: 0; font-weight: normal; }
+  #params-status.error { color: var(--danger); }
+  #params-wrap { position: relative; }
+  #params-editor { position: relative; z-index: 1; width: 100%; height: 72px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 12px; padding: 6px 8px; resize: none; }
+  #params-editor::placeholder { color: var(--text-dim); }
+  #params-highlight { position: absolute; z-index: 0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; color: transparent; pointer-events: none; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; }
+  .param-unused { text-decoration: underline wavy; text-decoration-color: var(--text-dim); text-decoration-skip-ink: none; }
+  .param-bad { text-decoration: underline wavy; text-decoration-color: var(--danger); text-decoration-skip-ink: none; }
   #editor-wrap { position: relative; padding: 8px; }
-  #editor { width: 100%; height: 120px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 13px; padding: 8px; resize: vertical; }
+  #editor-highlight { position: absolute; z-index: 0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; color: transparent; pointer-events: none; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; }
+  .param-ok { border-radius: 3px; background: rgba(45,111,196,0.22); box-shadow: 0 0 0 1px rgba(45,111,196,0.45); }
+  .param-missing { text-decoration: underline wavy; text-decoration-color: var(--danger); text-decoration-skip-ink: none; }
+  #sql-preview { display: none; margin-top: 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 8px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; color: var(--text-dim); max-height: 140px; overflow: auto; }
+  #sql-preview.show { display: block; }
+  #editor { width: 100%; height: 120px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 13px; padding: 8px; resize: none; }
+  #editor-wrap > #editor { position: relative; z-index: 1; background: transparent; }
+  .v-resizer { height: 7px; margin-top: -2px; border-radius: 4px; cursor: ns-resize; position: relative; z-index: 2; }
+  .v-resizer::after { content: ''; position: absolute; left: 50%; top: 3px; width: 28px; height: 2px; margin-left: -14px; border-radius: 1px; background: var(--border); }
+  .v-resizer:hover, .v-resizer.dragging { background: rgba(128,128,128,0.18); }
+  .v-resizer:hover::after, .v-resizer.dragging::after { background: var(--accent); }
   #autocomplete { position: absolute; z-index: 20; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; max-height: 160px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.25); display: none; min-width: 200px; }
   #autocomplete.show { display: block; }
   .ac-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
@@ -69,6 +90,7 @@ export const html = /* html */ `<!doctype html>
   .ac-kind-column { background: var(--success); }
   .ac-kind-keyword { background: var(--text-dim); }
   .ac-kind-operator { background: var(--danger); }
+  .ac-kind-param { background: #8a5cd6; }
   .ac-text { overflow: hidden; text-overflow: ellipsis; }
   button.primary { background: var(--accent); border: none; color: white; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
   button.secondary { background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
@@ -141,6 +163,7 @@ export const html = /* html */ `<!doctype html>
       <span id="active-conn-badge" class="conn-badge"></span>
       <button class="primary" id="run-btn" onclick="runQuery()">Run ▸</button>
       <button class="secondary" id="explain-btn" onclick="runQuery(false, true)">Explain</button>
+      <button class="secondary" id="toggle-preview-btn" onclick="togglePreview()" title="Show the SQL that will actually run, with :params substituted">Preview</button>
       <button class="secondary" id="export-btn" onclick="exportCsv()">Export CSV</button>
       <button class="secondary" id="copy-csv-btn" onclick="copyCsv()">Copy CSV</button>
       <button class="secondary toggled" id="toggle-filters-btn" onclick="toggleFilters()" title="Show/hide the per-column filter boxes (Cmd/Ctrl+F)">Filters</button>
@@ -148,9 +171,20 @@ export const html = /* html */ `<!doctype html>
       <span id="filter-status"></span>
       <span id="status"></span>
     </div>
+    <div id="params-panel">
+      <div class="params-head">Parameters<span id="params-status"></span></div>
+      <div id="params-wrap">
+        <div id="params-highlight"></div>
+        <textarea id="params-editor" placeholder="ids = 1, 2, 3&#10;since = '2026-01-01'" spellcheck="false"></textarea>
+      </div>
+      <div class="v-resizer" id="params-resizer" title="Drag to resize the parameters panel"></div>
+    </div>
     <div id="editor-wrap">
+      <div id="editor-highlight"></div>
       <textarea id="editor" placeholder="select * from ..." spellcheck="false"></textarea>
+      <div class="v-resizer" id="editor-resizer" title="Drag to resize the query editor"></div>
       <div id="autocomplete"></div>
+      <div id="sql-preview"></div>
     </div>
     <div id="results-wrap"><div class="empty-state">Pick a connection to get started.</div></div>
   </div>
@@ -204,7 +238,8 @@ let tabOrder = [];
 
 function openTab(connId) {
   if (!tabState.has(connId)) {
-    tabState.set(connId, { sql: '', result: null, error: null, status: '' });
+    const conn = connections.find((c) => c.id === connId);
+    tabState.set(connId, { sql: '', result: null, error: null, status: '', params: (conn && conn.params) || '' });
     tabOrder.push(connId);
   }
   switchTab(connId);
@@ -237,10 +272,14 @@ function switchTab(connId) {
   }
   if (activeConnId && tabState.has(activeConnId)) {
     tabState.get(activeConnId).sql = document.getElementById('editor').value;
+    tabState.get(activeConnId).params = document.getElementById('params-editor').value;
+    flushParamsSave(activeConnId);
   }
   activeConnId = connId;
-  const state = tabState.get(connId) || { sql: '', result: null, error: null, status: '' };
+  const state = tabState.get(connId) || { sql: '', result: null, error: null, status: '', params: '' };
   document.getElementById('editor').value = state.sql;
+  document.getElementById('params-editor').value = state.params || '';
+  refreshParams();
   document.getElementById('status').textContent = state.status || '';
   if (state.error) {
     renderQueryError(state.error, state.sql);
@@ -259,6 +298,7 @@ function switchTab(connId) {
 function closeTab(connId, e) {
   if (e) e.stopPropagation();
   if (!tabState.has(connId)) return;
+  flushParamsSave(connId);
   tabState.delete(connId);
   tabOrder = tabOrder.filter((id) => id !== connId);
   if (activeConnId === connId) {
@@ -268,6 +308,8 @@ function closeTab(connId, e) {
       switchTab(next);
     } else {
       document.getElementById('editor').value = '';
+      document.getElementById('params-editor').value = '';
+      refreshParams();
       document.getElementById('status').textContent = '';
       resetResultsState();
       document.getElementById('results-wrap').innerHTML = '<div class="empty-state">Pick a connection to get started.</div>';
@@ -432,6 +474,7 @@ function setTabStatus(connId, text) {
 async function runQuery(confirm, explain) {
   if (!activeConnId) return;
   hideAutocomplete();
+  refreshParams(true);
   const connId = activeConnId;
   const rawSql = document.getElementById('editor').value.trim();
   if (!rawSql) return;
@@ -445,7 +488,7 @@ async function runQuery(confirm, explain) {
     const res = await fetch(\`/api/connections/\${connId}/query\`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, confirm: !!confirm }),
+      body: JSON.stringify({ sql, confirm: !!confirm, params: paramsText() }),
     });
     const body = await res.json();
     if (res.status === 409 && body.needsConfirm) {
@@ -496,10 +539,15 @@ function renderQueryError(err, editorSql) {
   resetResultsState();
   const wrap = document.getElementById('results-wrap');
   const rawOffset = err.position != null ? err.position - (err.explainOffset || 0) : undefined;
-  const loc = rawOffset != null ? computeLineCol(editorSql, rawOffset) : null;
+  // The interpolated SQL the server ran still carries any EXPLAIN prefix we added,
+  // and rawOffset is already relative to the text without it.
+  const interpolated = err.interpolatedSql ? err.interpolatedSql.slice(err.explainOffset || 0) : null;
+  const loc = rawOffset != null ? computeLineCol(interpolated || editorSql, rawOffset) : null;
   const parts = [];
   parts.push(\`<div class="err-message">\${escapeHtml(err.message || 'Query failed')}</div>\`);
-  if (loc) {
+  if (loc && interpolated) {
+    parts.push(\`<div class="err-detail">At Ln \${loc.line}, Col \${loc.col} of the SQL after parameter substitution</div>\`);
+  } else if (loc) {
     parts.push(\`<div class="err-loc" data-offset="\${loc.offset}">Ln \${loc.line}, Col \${loc.col}</div>\`);
   }
   if (err.detail) parts.push(\`<div class="err-detail"><b>Detail:</b> \${escapeHtml(err.detail)}</div>\`);
@@ -1292,6 +1340,7 @@ document.addEventListener('copy', (e) => {
 
 async function exportCsv() {
   if (!activeConnId) return;
+  refreshParams(true);
   const sql = document.getElementById('editor').value.trim();
   if (!sql) return;
   const url = \`/api/connections/\${activeConnId}/export\`;
@@ -1299,7 +1348,7 @@ async function exportCsv() {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql }),
+      body: JSON.stringify({ sql, params: paramsText() }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -1542,64 +1591,110 @@ function findTableInfo(name, pseudoTables) {
 
 // ---- statement splitting (semicolon-aware, quote/comment/dollar-quote safe) ----
 
-function splitStatements(sql) {
-  const stmts = [];
+// One SQL scanner for the whole frontend. It reports the text as spans of code and
+// non-code (string literals, dollar-quoted blocks, comments); maskNonSql,
+// splitStatements and findParamRefs are all built on it so their grammars cannot
+// drift apart. The server keeps its own copy in src/params.ts, since the inline UI
+// script has no build step and cannot import it.
+function scanSql(text) {
+  const spans = [];
+  const n = text.length;
   let state = 'NORMAL';
-  let stmtStart = 0;
+  let spanStart = 0;
   let dollarTag = null;
   let blockDepth = 0;
-  const n = sql.length;
+  let escapeString = false;
   let i = 0;
+
+  // E'...' takes backslash escapes, so a backslashed quote inside one is not the end.
+  const opensEscapeString = (idx) => {
+    const prev = text[idx - 1];
+    if (prev !== 'E' && prev !== 'e') return false;
+    const before = text[idx - 2];
+    return before === undefined || !/[A-Za-z0-9_$]/.test(before);
+  };
+  const close = (kind, end) => {
+    if (end > spanStart) spans.push({ kind, start: spanStart, end });
+    spanStart = end;
+  };
+
   while (i < n) {
-    const c = sql[i];
+    const c = text[i];
     if (state === 'NORMAL') {
-      if (c === "'") { state = 'SINGLE'; i++; continue; }
-      if (c === '"') { state = 'DOUBLE'; i++; continue; }
-      if (c === '-' && sql[i + 1] === '-') { state = 'LINE'; i += 2; continue; }
-      if (c === '/' && sql[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; i += 2; continue; }
+      if (c === "'") { close('code', i); state = 'SINGLE'; escapeString = opensEscapeString(i); i++; continue; }
+      if (c === '"') { close('code', i); state = 'DOUBLE'; i++; continue; }
+      if (c === '-' && text[i + 1] === '-') { close('code', i); state = 'LINE'; i += 2; continue; }
+      if (c === '/' && text[i + 1] === '*') { close('code', i); state = 'BLOCK'; blockDepth = 1; i += 2; continue; }
       if (c === '$') {
-        const m = /^\\$[A-Za-z_]*\\$/.exec(sql.slice(i));
-        if (m) { dollarTag = m[0]; state = 'DOLLAR'; i += m[0].length; continue; }
+        // A dollar sign is a legal identifier character in Postgres, so foo$tag$bar
+        // is one identifier, not a dollar-quoted block.
+        const before = text[i - 1];
+        const partOfIdent = before !== undefined && /[A-Za-z0-9_$]/.test(before);
+        const m = partOfIdent ? null : /^\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$/.exec(text.slice(i));
+        if (m) { close('code', i); dollarTag = m[0]; state = 'DOLLAR'; i += m[0].length; continue; }
       }
-      if (c === ';') {
-        stmts.push({ start: stmtStart, end: i, text: sql.slice(stmtStart, i) });
-        stmtStart = i + 1;
+      i++;
+      continue;
+    }
+    if (state === 'SINGLE' || state === 'DOUBLE') {
+      const q = state === 'SINGLE' ? "'" : '"';
+      if (state === 'SINGLE' && escapeString && c === '\\\\') { i += 2; continue; }
+      if (c === q) {
+        if (text[i + 1] === q) { i += 2; continue; } // a doubled quote is an escaped one
+        state = 'NORMAL';
+        close('quoted', i + 1);
         i++;
         continue;
       }
       i++;
       continue;
     }
-    if (state === 'SINGLE') {
-      if (c === "'") {
-        if (sql[i + 1] === "'") { i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
-    if (state === 'DOUBLE') {
-      if (c === '"') {
-        if (sql[i + 1] === '"') { i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
     if (state === 'LINE') {
-      if (c === '\\n') state = 'NORMAL';
-      i++; continue;
+      // The newline itself stays code, so line and column offsets are unaffected.
+      if (c === '\\n') { state = 'NORMAL'; close('comment', i); i++; continue; }
+      i++;
+      continue;
     }
     if (state === 'BLOCK') {
-      if (c === '/' && sql[i + 1] === '*') { blockDepth++; i += 2; continue; }
-      if (c === '*' && sql[i + 1] === '/') { blockDepth--; i += 2; if (blockDepth === 0) state = 'NORMAL'; continue; }
-      i++; continue;
+      if (c === '/' && text[i + 1] === '*') { blockDepth++; i += 2; continue; }
+      if (c === '*' && text[i + 1] === '/') {
+        blockDepth--;
+        i += 2;
+        if (blockDepth === 0) { state = 'NORMAL'; close('comment', i); }
+        continue;
+      }
+      i++;
+      continue;
     }
     if (state === 'DOLLAR') {
-      if (sql.startsWith(dollarTag, i)) { state = 'NORMAL'; i += dollarTag.length; dollarTag = null; continue; }
-      i++; continue;
+      if (text.startsWith(dollarTag, i)) {
+        i += dollarTag.length;
+        state = 'NORMAL';
+        dollarTag = null;
+        close('quoted', i);
+        continue;
+      }
+      i++;
+      continue;
     }
     i++;
   }
-  stmts.push({ start: stmtStart, end: n, text: sql.slice(stmtStart, n) });
+  close(state === 'NORMAL' ? 'code' : 'unterminated', n);
+  return spans;
+}
+
+function splitStatements(sql) {
+  const stmts = [];
+  let stmtStart = 0;
+  for (const span of scanSql(sql)) {
+    if (span.kind !== 'code') continue;
+    for (let i = span.start; i < span.end; i++) {
+      if (sql[i] !== ';') continue;
+      stmts.push({ start: stmtStart, end: i, text: sql.slice(stmtStart, i) });
+      stmtStart = i + 1;
+    }
+  }
+  stmts.push({ start: stmtStart, end: sql.length, text: sql.slice(stmtStart, sql.length) });
   return stmts;
 }
 
@@ -1614,64 +1709,9 @@ function statementAt(statements, pos) {
 // regex tokenizer downstream doesn't get confused by SQL-looking text inside literals.
 function maskNonSql(text) {
   const chars = text.split('');
-  let state = 'NORMAL';
-  let dollarTag = null;
-  let blockDepth = 0;
-  const n = text.length;
-  let i = 0;
-  while (i < n) {
-    const c = text[i];
-    if (state === 'NORMAL') {
-      if (c === "'") { state = 'SINGLE'; chars[i] = ' '; i++; continue; }
-      if (c === '"') { state = 'DOUBLE'; chars[i] = ' '; i++; continue; }
-      if (c === '-' && text[i + 1] === '-') { state = 'LINE'; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
-      if (c === '/' && text[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
-      if (c === '$') {
-        const m = /^\\$[A-Za-z_]*\\$/.exec(text.slice(i));
-        if (m) {
-          dollarTag = m[0];
-          state = 'DOLLAR';
-          for (let k = 0; k < m[0].length; k++) chars[i + k] = ' ';
-          i += m[0].length;
-          continue;
-        }
-      }
-      i++;
-      continue;
-    }
-    if (state === 'SINGLE') {
-      chars[i] = ' ';
-      if (c === "'") {
-        if (text[i + 1] === "'") { chars[i + 1] = ' '; i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
-    if (state === 'DOUBLE') {
-      chars[i] = ' ';
-      if (c === '"') {
-        if (text[i + 1] === '"') { chars[i + 1] = ' '; i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
-    if (state === 'LINE') {
-      if (c === '\\n') { state = 'NORMAL'; i++; continue; }
-      chars[i] = ' '; i++; continue;
-    }
-    if (state === 'BLOCK') {
-      if (c === '/' && text[i + 1] === '*') { blockDepth++; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
-      if (c === '*' && text[i + 1] === '/') { blockDepth--; chars[i] = ' '; chars[i + 1] = ' '; i += 2; if (blockDepth === 0) state = 'NORMAL'; continue; }
-      chars[i] = ' '; i++; continue;
-    }
-    if (state === 'DOLLAR') {
-      if (text.startsWith(dollarTag, i)) {
-        for (let k = 0; k < dollarTag.length; k++) chars[i + k] = ' ';
-        state = 'NORMAL'; i += dollarTag.length; dollarTag = null; continue;
-      }
-      chars[i] = ' '; i++; continue;
-    }
-    i++;
+  for (const span of scanSql(text)) {
+    if (span.kind === 'code') continue;
+    for (let i = span.start; i < span.end; i++) chars[i] = ' ';
   }
   return chars.join('');
 }
@@ -1933,7 +1973,22 @@ function acceptAutocomplete(index) {
 function handleEditorInput() {
   const editor = document.getElementById('editor');
   if (activeConnId && tabState.has(activeConnId)) tabState.get(activeConnId).sql = editor.value;
+  refreshParams();
   const { start, end, word } = currentWordRange(editor);
+
+  // A :name reference — complete against the defined parameters.
+  if (editor.value[start - 1] === ':' && editor.value[start - 2] !== ':') {
+    const matches = byPrefix(Object.keys(paramsCache.params), word, 'param').slice(0, 8);
+    if (!matches.length) {
+      hideAutocomplete();
+      return;
+    }
+    acStart = start;
+    acEnd = end;
+    showAutocomplete(matches);
+    return;
+  }
+
   if (!word) {
     hideAutocomplete();
     return;
@@ -1998,6 +2053,373 @@ function updateAutocompleteActive() {
   const items = box.querySelectorAll('.ac-item');
   items.forEach((el, i) => el.classList.toggle('active', i === acIndex));
 }
+
+
+// ---- query parameters -------------------------------------------------------
+// Values are spliced into the SQL verbatim, psql set-style, so 'ids = 1, 2, 3'
+// works inside 'in (:ids)'. The server re-parses and re-interpolates; everything
+// here is for feedback while typing.
+
+let paramsCache = { params: {}, errors: [] };
+// One pending save per connection: switching tabs mid-edit must not cancel the
+// save the connection we just left had queued.
+const pendingParamSaves = new Map(); // connId -> { text, token, id: timeout id }
+// The edit no response has confirmed yet, whether it is still waiting on the
+// debounce or already in flight. An ordinary PUT is not keepalive, so the unload
+// can abort it; this is what the unload handler resends. Each edit carries a token,
+// because comparing the text alone would let a late reply to an older request clear
+// a newer edit that happens to read the same.
+const unconfirmedParams = new Map(); // connId -> { text, token }
+let paramsSaveToken = 0;
+const paramsSaveFailed = new Set(); // connIds whose last save did not land
+
+function parseParamsText(text) {
+  const params = {};
+  const errors = [];
+  const lines = (text || '').split('\\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('--')) continue;
+    const eq = raw.indexOf('=');
+    if (eq === -1) {
+      errors.push({ line: i + 1, message: 'expected "name = value"' });
+      continue;
+    }
+    const name = raw.slice(0, eq).trim().replace(/^:/, '');
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      errors.push({ line: i + 1, message: 'invalid parameter name' });
+      continue;
+    }
+    params[name] = raw.slice(eq + 1).trim();
+  }
+  return { params, errors };
+}
+
+// maskNonSql blanks strings, comments and dollar-quoted blocks while preserving
+// offsets, so a scan of the masked text gives positions in the original.
+function findParamRefs(sql) {
+  const masked = maskNonSql(sql);
+  const refs = [];
+  let i = 0;
+  while (i < masked.length) {
+    if (masked[i] !== ':') { i++; continue; }
+    if (masked[i + 1] === ':') { i += 2; continue; } // a ::type cast
+    const m = /^:([A-Za-z_][A-Za-z0-9_]*)/.exec(masked.slice(i));
+    if (!m) { i++; continue; }
+    refs.push({ name: m[1], start: i, end: i + m[0].length });
+    i += m[0].length;
+  }
+  return refs;
+}
+
+function interpolateSql(sql, params) {
+  const refs = findParamRefs(sql);
+  const missing = [];
+  let out = '';
+  let last = 0;
+  let changed = false;
+  for (const ref of refs) {
+    if (!Object.prototype.hasOwnProperty.call(params, ref.name) || params[ref.name] === '') {
+      if (!missing.includes(ref.name)) missing.push(ref.name);
+      continue;
+    }
+    out += sql.slice(last, ref.start) + params[ref.name];
+    last = ref.end;
+    changed = true;
+  }
+  out += sql.slice(last);
+  return { sql: out, missing, changed };
+}
+
+function paramsText() {
+  return document.getElementById('params-editor').value;
+}
+
+// The panel shows itself as soon as the query mentions a parameter, and hides
+// again once nothing references one and nothing is defined.
+function updateParamsVisibility(refs) {
+  const panel = document.getElementById('params-panel');
+  const on = refs.length > 0 || paramsText().trim().length > 0;
+  if (panel.classList.contains('show') === on) return on;
+  panel.classList.toggle('show', on);
+  syncOverlays();
+  return on;
+}
+
+// A :name typed in the editor declares the parameter: it gets its own line in the
+// panel, waiting for a value. A name is only seeded once per tab, so deleting the
+// line it added doesn't make it come straight back.
+function seedParams(refs, includeCaretWord) {
+  if (!activeConnId || !tabState.has(activeConnId)) return false;
+  const state = tabState.get(activeConnId);
+  if (!state.seeded) state.seeded = new Set();
+  const editor = document.getElementById('editor');
+  // A name still being typed ends right at the caret; seeding it would leave a
+  // line for every prefix (:i, :id) on the way to :ids. Running the query settles
+  // the matter, so that pass takes the name under the caret too.
+  const caret = !includeCaretWord && document.activeElement === editor ? editor.selectionStart : -1;
+  const added = [];
+  for (const ref of refs) {
+    if (ref.end === caret) continue;
+    if (Object.prototype.hasOwnProperty.call(paramsCache.params, ref.name)) continue;
+    if (state.seeded.has(ref.name)) continue;
+    state.seeded.add(ref.name);
+    added.push(ref.name);
+  }
+  if (!added.length) return false;
+  const panel = document.getElementById('params-editor');
+  const existing = panel.value.replace(/\\n+$/, '');
+  const lines = added.map((name) => name + ' = ');
+  panel.value = (existing ? existing + '\\n' : '') + lines.join('\\n') + '\\n';
+  paramsCache = parseParamsText(panel.value);
+  saveParamsSoon();
+  return true;
+}
+
+function togglePreview() {
+  const box = document.getElementById('sql-preview');
+  const on = !box.classList.contains('show');
+  box.classList.toggle('show', on);
+  document.getElementById('toggle-preview-btn').classList.toggle('toggled', on);
+  localStorage.setItem('bdbc.sqlPreview', on ? '1' : '0');
+  updatePreview();
+}
+
+function renderParamsStatus(info) {
+  const el = document.getElementById('params-status');
+  const names = Object.keys(paramsCache.params);
+  const bits = [];
+  const bad = [];
+  if (names.length) bits.push(names.length + ' defined');
+  if (info.unused.length) bits.push('unused: ' + info.unused.map((m) => ':' + m).join(', '));
+  if (paramsCache.errors.length) {
+    const e = paramsCache.errors[0];
+    bad.push('line ' + e.line + ': ' + e.message);
+  }
+  if (info.unset.length) bad.push('awaiting a value: ' + info.unset.map((m) => ':' + m).join(', '));
+  if (info.missing.length) bad.push('undefined: ' + info.missing.map((m) => ':' + m).join(', '));
+  if (activeConnId && paramsSaveFailed.has(activeConnId)) bad.push('not saved — retrying on the next edit');
+  el.classList.toggle('error', bad.length > 0);
+  el.textContent = bits.concat(bad).join(' · ');
+}
+
+function syncOverlay(editorId, highlightId) {
+  const editor = document.getElementById(editorId);
+  const hl = document.getElementById(highlightId);
+  const style = getComputedStyle(editor);
+  ['fontFamily', 'fontSize', 'lineHeight', 'padding', 'borderWidth', 'borderStyle', 'letterSpacing'].forEach((prop) => {
+    hl.style[prop] = style[prop];
+  });
+  hl.style.left = editor.offsetLeft + 'px';
+  hl.style.top = editor.offsetTop + 'px';
+  hl.style.width = editor.offsetWidth + 'px';
+  hl.style.height = editor.offsetHeight + 'px';
+  hl.scrollTop = editor.scrollTop;
+}
+
+function syncOverlays() {
+  syncOverlay('editor', 'editor-highlight');
+  syncOverlay('params-editor', 'params-highlight');
+}
+
+function renderEditorHighlight(refs) {
+  const editor = document.getElementById('editor');
+  const hl = document.getElementById('editor-highlight');
+  const sql = editor.value;
+  let out = '';
+  let last = 0;
+  for (const ref of refs) {
+    const value = paramsCache.params[ref.name];
+    const bound = value !== undefined && value !== '';
+    out += escapeHtml(sql.slice(last, ref.start));
+    out += '<span class="' + (bound ? 'param-ok' : 'param-missing') + '">' + escapeHtml(sql.slice(ref.start, ref.end)) + '</span>';
+    last = ref.end;
+  }
+  out += escapeHtml(sql.slice(last)) + '\\n';
+  hl.innerHTML = out;
+  syncOverlay('editor', 'editor-highlight');
+}
+
+// Squiggles the name of any parameter the current query never mentions, and of any
+// line that didn't parse.
+function renderParamsHighlight(unused) {
+  const editor = document.getElementById('params-editor');
+  const hl = document.getElementById('params-highlight');
+  const badLines = new Set(paramsCache.errors.map((e) => e.line));
+  const out = editor.value.split('\\n').map((line, i) => {
+    if (badLines.has(i + 1)) return '<span class="param-bad">' + escapeHtml(line) + '</span>';
+    const eq = line.indexOf('=');
+    if (eq === -1) return escapeHtml(line);
+    const name = line.slice(0, eq).trim().replace(/^:/, '');
+    if (!unused.includes(name)) return escapeHtml(line);
+    const start = line.indexOf(name);
+    return escapeHtml(line.slice(0, start)) +
+      '<span class="param-unused">' + escapeHtml(name) + '</span>' +
+      escapeHtml(line.slice(start + name.length));
+  }).join('\\n');
+  hl.innerHTML = out + '\\n';
+  syncOverlay('params-editor', 'params-highlight');
+}
+
+function updatePreview() {
+  const box = document.getElementById('sql-preview');
+  if (!box.classList.contains('show')) return;
+  const sql = document.getElementById('editor').value;
+  const result = interpolateSql(sql, paramsCache.params);
+  box.textContent = result.changed ? result.sql : '(no parameters substituted)';
+}
+
+function refreshParams(includeCaretWord) {
+  paramsCache = parseParamsText(paramsText());
+  let refs = findParamRefs(document.getElementById('editor').value);
+  if (seedParams(refs, includeCaretWord)) refs = findParamRefs(document.getElementById('editor').value);
+  const missing = [];
+  const unset = [];
+  const referenced = new Set();
+  for (const ref of refs) {
+    referenced.add(ref.name);
+    const value = paramsCache.params[ref.name];
+    if (value === undefined) {
+      if (!missing.includes(ref.name)) missing.push(ref.name);
+    } else if (value === '' && !unset.includes(ref.name)) {
+      unset.push(ref.name);
+    }
+  }
+  const unused = Object.keys(paramsCache.params).filter((name) => !referenced.has(name));
+  updateParamsVisibility(refs);
+  renderParamsStatus({ missing, unset, unused });
+  renderEditorHighlight(refs);
+  renderParamsHighlight(unused);
+  updatePreview();
+}
+
+// keepalive is only for the beforeunload flush: it has a 64 KiB budget shared across
+// in-flight requests, which an ordinary save has no reason to spend.
+async function saveParams(connId, text, token, keepalive) {
+  try {
+    const res = await fetch(\`/api/connections/\${connId}/params\`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ params: text }),
+      keepalive: !!keepalive,
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    // Only clear it if nothing newer was typed while this request was out.
+    const unconfirmed = unconfirmedParams.get(connId);
+    if (unconfirmed && unconfirmed.token === token) unconfirmedParams.delete(connId);
+    paramsSaveFailed.delete(connId);
+  } catch (err) {
+    // The edit only lives in memory until a save lands, so say so rather than
+    // letting it look persisted and vanish on reload.
+    paramsSaveFailed.add(connId);
+  }
+  if (connId === activeConnId) refreshParams();
+}
+
+function flushParamsSave(connId, keepalive) {
+  const pending = pendingParamSaves.get(connId);
+  if (!pending) return;
+  clearTimeout(pending.id);
+  pendingParamSaves.delete(connId);
+  saveParams(connId, pending.text, pending.token, keepalive);
+}
+
+function saveParamsSoon() {
+  const connId = activeConnId;
+  if (!connId) return;
+  const text = paramsText();
+  if (tabState.has(connId)) tabState.get(connId).params = text;
+  const conn = connections.find((c) => c.id === connId);
+  if (conn) conn.params = text;
+  const token = ++paramsSaveToken;
+  unconfirmedParams.set(connId, { text, token });
+  const pending = pendingParamSaves.get(connId);
+  if (pending) clearTimeout(pending.id);
+  pendingParamSaves.set(connId, {
+    text,
+    token,
+    id: setTimeout(() => {
+      pendingParamSaves.delete(connId);
+      saveParams(connId, text, token);
+    }, 400),
+  });
+}
+
+document.getElementById('params-editor').addEventListener('input', () => {
+  saveParamsSoon();
+  refreshParams();
+});
+document.getElementById('editor').addEventListener('scroll', () => {
+  document.getElementById('editor-highlight').scrollTop = document.getElementById('editor').scrollTop;
+});
+document.getElementById('params-editor').addEventListener('scroll', () => {
+  document.getElementById('params-highlight').scrollTop = document.getElementById('params-editor').scrollTop;
+});
+// Both editors resize by dragging their whole lower border, between a floor and a
+// ceiling, and come back at the height they were left at.
+function initVerticalResize(editorId, handleId, key, minHeight, maxFraction) {
+  const el = document.getElementById(editorId);
+  const handle = document.getElementById(handleId);
+  const maxHeight = () => Math.max(minHeight, Math.round(window.innerHeight * maxFraction));
+  const clamp = (h) => Math.max(minHeight, Math.min(maxHeight(), h));
+
+  const saved = parseInt(localStorage.getItem(key) || '', 10);
+  if (saved) el.style.height = clamp(saved) + 'px';
+  new ResizeObserver(() => syncOverlays()).observe(el);
+
+  let startY = 0;
+  let startHeight = 0;
+  let dragging = false;
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startHeight = el.offsetHeight;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'ns-resize';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    el.style.height = clamp(startHeight + e.clientY - startY) + 'px';
+    syncOverlays();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    localStorage.setItem(key, parseInt(el.style.height, 10));
+  });
+  // A double-click on the handle snaps back to the default height.
+  handle.addEventListener('dblclick', () => {
+    el.style.height = '';
+    localStorage.removeItem(key);
+    syncOverlays();
+  });
+}
+
+window.addEventListener('resize', () => syncOverlays());
+window.addEventListener('beforeunload', () => {
+  // Send every value that has not been confirmed saved, with keepalive so it
+  // outlives the page: the queued ones first, then anything whose ordinary PUT is
+  // still in flight and about to be cut off. Re-sending the same text is harmless.
+  const sent = new Set();
+  for (const connId of [...pendingParamSaves.keys()]) {
+    flushParamsSave(connId, true);
+    sent.add(connId);
+  }
+  for (const [connId, unconfirmed] of [...unconfirmedParams]) {
+    if (!sent.has(connId)) saveParams(connId, unconfirmed.text, unconfirmed.token, true);
+  }
+});
+
+(function initParamsPanel() {
+  initVerticalResize('editor', 'editor-resizer', 'bdbc.editorHeight', 60, 0.6);
+  initVerticalResize('params-editor', 'params-resizer', 'bdbc.paramsHeight', 44, 0.4);
+  if (localStorage.getItem('bdbc.sqlPreview') === '1') togglePreview();
+  syncOverlays();
+})();
 
 document.getElementById('editor').addEventListener('input', handleEditorInput);
 document.getElementById('editor').addEventListener('keydown', handleEditorKeydown);

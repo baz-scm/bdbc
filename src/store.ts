@@ -17,6 +17,8 @@ export interface Connection {
   user: string;
   password: string;
   ssl: boolean;
+  /** Raw params panel text (`name = value` per line), interpolated into queries as `:name`. */
+  params: string;
 }
 
 export type PublicConnection = Omit<Connection, "password"> & { hasPassword: boolean };
@@ -35,7 +37,10 @@ function ensureConfig(): void {
 function readAll(): Connection[] {
   ensureConfig();
   try {
-    return JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
+    const raw = JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
+    if (!Array.isArray(raw)) return [];
+    // `params` was added after the first releases; older records lack it.
+    return raw.map((c: any) => ({ ...c, params: typeof c.params === "string" ? c.params : "" }));
   } catch {
     return [];
   }
@@ -76,6 +81,7 @@ export function updateConnection(id: string, input: Partial<Omit<Connection, "id
     ...existing,
     ...input,
     password: input.password && input.password.length > 0 ? input.password : existing.password,
+    params: typeof input.params === "string" ? input.params : existing.params,
   };
   conns[idx] = merged;
   writeAll(conns);

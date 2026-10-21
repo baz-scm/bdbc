@@ -6,11 +6,47 @@ A super lightweight Postgres client for the browser. Single Bun binary, zero ext
 
 - Manage multiple Postgres connections, browsable as a collapsible tree per connection → schema → table
 - Paste a full connection string (`postgres://user:pass@host:5432/db?sslmode=require`) and have it parsed into fields
-- SQL editor with table-name autocomplete, `Cmd`/`Ctrl`+`Enter` to run
+- SQL editor with table-name autocomplete, `Cmd`/`Ctrl`+`Enter` to run, resizable by dragging its lower border (double-click the border to reset)
 - `Explain` button to see the query plan without executing
 - Confirmation prompt before running destructive statements (`DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `GRANT`, `REVOKE`, `INSERT`)
+- Query parameters: write `:name` in a query and bind it once in the Parameters panel, which appears on its own
 - Export query results to CSV with headers
 - Light/dark theme follows your OS setting
+
+## Query parameters
+
+Write `:name` anywhere in a query:
+
+```sql
+select * from orders where id in (:ids) and created_at > :since;
+```
+
+The Parameters panel opens by itself as soon as the query mentions one, with a line
+waiting for each name:
+
+```
+# comments and blank lines are ignored
+ids = 1, 2, 3
+since = '2026-01-01'
+```
+
+The editor marks a reference that is bound, and underlines in red one that is still
+waiting for a value. A parameter the current query never mentions is underlined in the
+panel, so stale definitions are easy to spot and drop. Running a query with an unbound
+`:name` fails locally, before anything reaches Postgres.
+
+Values are spliced in verbatim, like psql's `\set`, so a parameter can hold a list, an
+expression or an identifier — not only a single scalar. References inside string literals,
+dollar-quoted blocks and comments are left alone, and `::type` casts are never mistaken for
+a parameter.
+
+Parameters belong to the connection they were defined on, are saved with it in
+`~/.bdbc/connections.json`, and come back when you reopen that connection's tab. The
+**Preview** button shows the SQL that will actually run, after substitution.
+
+> One sharp edge: an array slice written with named bounds (`arr[lo:hi]`) looks exactly like
+> a parameter reference. Write such slices with literal bounds, or avoid parameter names that
+> collide with them.
 
 ## Install
 
