@@ -2064,6 +2064,10 @@ let paramsCache = { params: {}, errors: [] };
 // One pending save per connection: switching tabs mid-edit must not cancel the
 // save the connection we just left had queued.
 const pendingParamSaves = new Map(); // connId -> { text, id: timeout id }
+// Text that no response has confirmed yet, whether it is still waiting on the
+// debounce or already in flight. An ordinary PUT is not keepalive, so the unload
+// can abort it; this is what the unload handler resends.
+const unconfirmedParams = new Map(); // connId -> text
 const paramsSaveFailed = new Set(); // connIds whose last save did not land
 
 function parseParamsText(text) {
@@ -2298,6 +2302,8 @@ async function saveParams(connId, text, keepalive) {
       keepalive: !!keepalive,
     });
     if (!res.ok) throw new Error(res.statusText);
+    // Only clear it if nothing newer was typed while this request was out.
+    if (unconfirmedParams.get(connId) === text) unconfirmedParams.delete(connId);
     paramsSaveFailed.delete(connId);
   } catch (err) {
     // The edit only lives in memory until a save lands, so say so rather than
@@ -2322,6 +2328,7 @@ function saveParamsSoon() {
   if (tabState.has(connId)) tabState.get(connId).params = text;
   const conn = connections.find((c) => c.id === connId);
   if (conn) conn.params = text;
+  unconfirmedParams.set(connId, text);
   const pending = pendingParamSaves.get(connId);
   if (pending) clearTimeout(pending.id);
   pendingParamSaves.set(connId, {
@@ -2388,7 +2395,17 @@ function initVerticalResize(editorId, handleId, key, minHeight, maxFraction) {
 
 window.addEventListener('resize', () => syncOverlays());
 window.addEventListener('beforeunload', () => {
-  for (const connId of [...pendingParamSaves.keys()]) flushParamsSave(connId, true);
+  // Send every value that has not been confirmed saved, with keepalive so it
+  // outlives the page: the queued ones first, then anything whose ordinary PUT is
+  // still in flight and about to be cut off. Re-sending the same text is harmless.
+  const sent = new Set();
+  for (const connId of [...pendingParamSaves.keys()]) {
+    flushParamsSave(connId, true);
+    sent.add(connId);
+  }
+  for (const [connId, text] of [...unconfirmedParams]) {
+    if (!sent.has(connId)) saveParams(connId, text, true);
+  }
 });
 
 (function initParamsPanel() {
