@@ -1589,64 +1589,106 @@ function findTableInfo(name, pseudoTables) {
 
 // ---- statement splitting (semicolon-aware, quote/comment/dollar-quote safe) ----
 
-function splitStatements(sql) {
-  const stmts = [];
+// One SQL scanner for the whole frontend. It reports the text as spans of code and
+// non-code (string literals, dollar-quoted blocks, comments); maskNonSql,
+// splitStatements and findParamRefs are all built on it so their grammars cannot
+// drift apart. The server keeps its own copy in src/params.ts, since the inline UI
+// script has no build step and cannot import it.
+function scanSql(text) {
+  const spans = [];
+  const n = text.length;
   let state = 'NORMAL';
-  let stmtStart = 0;
+  let spanStart = 0;
   let dollarTag = null;
   let blockDepth = 0;
-  const n = sql.length;
+  let escapeString = false;
   let i = 0;
+
+  // E'...' takes backslash escapes, so a backslashed quote inside one is not the end.
+  const opensEscapeString = (idx) => {
+    const prev = text[idx - 1];
+    if (prev !== 'E' && prev !== 'e') return false;
+    const before = text[idx - 2];
+    return before === undefined || !/[A-Za-z0-9_$]/.test(before);
+  };
+  const close = (kind, end) => {
+    if (end > spanStart) spans.push({ kind, start: spanStart, end });
+    spanStart = end;
+  };
+
   while (i < n) {
-    const c = sql[i];
+    const c = text[i];
     if (state === 'NORMAL') {
-      if (c === "'") { state = 'SINGLE'; i++; continue; }
-      if (c === '"') { state = 'DOUBLE'; i++; continue; }
-      if (c === '-' && sql[i + 1] === '-') { state = 'LINE'; i += 2; continue; }
-      if (c === '/' && sql[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; i += 2; continue; }
+      if (c === "'") { close('code', i); state = 'SINGLE'; escapeString = opensEscapeString(i); i++; continue; }
+      if (c === '"') { close('code', i); state = 'DOUBLE'; i++; continue; }
+      if (c === '-' && text[i + 1] === '-') { close('code', i); state = 'LINE'; i += 2; continue; }
+      if (c === '/' && text[i + 1] === '*') { close('code', i); state = 'BLOCK'; blockDepth = 1; i += 2; continue; }
       if (c === '$') {
-        const m = /^\\$[A-Za-z_]*\\$/.exec(sql.slice(i));
-        if (m) { dollarTag = m[0]; state = 'DOLLAR'; i += m[0].length; continue; }
+        const m = /^\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$/.exec(text.slice(i));
+        if (m) { close('code', i); dollarTag = m[0]; state = 'DOLLAR'; i += m[0].length; continue; }
       }
-      if (c === ';') {
-        stmts.push({ start: stmtStart, end: i, text: sql.slice(stmtStart, i) });
-        stmtStart = i + 1;
+      i++;
+      continue;
+    }
+    if (state === 'SINGLE' || state === 'DOUBLE') {
+      const q = state === 'SINGLE' ? "'" : '"';
+      if (state === 'SINGLE' && escapeString && c === '\\\\') { i += 2; continue; }
+      if (c === q) {
+        if (text[i + 1] === q) { i += 2; continue; } // a doubled quote is an escaped one
+        state = 'NORMAL';
+        close('quoted', i + 1);
         i++;
         continue;
       }
       i++;
       continue;
     }
-    if (state === 'SINGLE') {
-      if (c === "'") {
-        if (sql[i + 1] === "'") { i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
-    if (state === 'DOUBLE') {
-      if (c === '"') {
-        if (sql[i + 1] === '"') { i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
     if (state === 'LINE') {
-      if (c === '\\n') state = 'NORMAL';
-      i++; continue;
+      // The newline itself stays code, so line and column offsets are unaffected.
+      if (c === '\\n') { state = 'NORMAL'; close('comment', i); i++; continue; }
+      i++;
+      continue;
     }
     if (state === 'BLOCK') {
-      if (c === '/' && sql[i + 1] === '*') { blockDepth++; i += 2; continue; }
-      if (c === '*' && sql[i + 1] === '/') { blockDepth--; i += 2; if (blockDepth === 0) state = 'NORMAL'; continue; }
-      i++; continue;
+      if (c === '/' && text[i + 1] === '*') { blockDepth++; i += 2; continue; }
+      if (c === '*' && text[i + 1] === '/') {
+        blockDepth--;
+        i += 2;
+        if (blockDepth === 0) { state = 'NORMAL'; close('comment', i); }
+        continue;
+      }
+      i++;
+      continue;
     }
     if (state === 'DOLLAR') {
-      if (sql.startsWith(dollarTag, i)) { state = 'NORMAL'; i += dollarTag.length; dollarTag = null; continue; }
-      i++; continue;
+      if (text.startsWith(dollarTag, i)) {
+        i += dollarTag.length;
+        state = 'NORMAL';
+        dollarTag = null;
+        close('quoted', i);
+        continue;
+      }
+      i++;
+      continue;
     }
     i++;
   }
-  stmts.push({ start: stmtStart, end: n, text: sql.slice(stmtStart, n) });
+  close(state === 'NORMAL' ? 'code' : 'unterminated', n);
+  return spans;
+}
+
+function splitStatements(sql) {
+  const stmts = [];
+  let stmtStart = 0;
+  for (const span of scanSql(sql)) {
+    if (span.kind !== 'code') continue;
+    for (let i = span.start; i < span.end; i++) {
+      if (sql[i] !== ';') continue;
+      stmts.push({ start: stmtStart, end: i, text: sql.slice(stmtStart, i) });
+      stmtStart = i + 1;
+    }
+  }
+  stmts.push({ start: stmtStart, end: sql.length, text: sql.slice(stmtStart, sql.length) });
   return stmts;
 }
 
@@ -1661,73 +1703,9 @@ function statementAt(statements, pos) {
 // regex tokenizer downstream doesn't get confused by SQL-looking text inside literals.
 function maskNonSql(text) {
   const chars = text.split('');
-  let state = 'NORMAL';
-  let dollarTag = null;
-  let blockDepth = 0;
-  let escapeString = false;
-  // E'...' takes backslash escapes, so a backslashed quote inside one is not the end.
-  const opensEscapeString = (idx) => {
-    const prev = text[idx - 1];
-    if (prev !== 'E' && prev !== 'e') return false;
-    const before = text[idx - 2];
-    return before === undefined || !/[A-Za-z0-9_$]/.test(before);
-  };
-  const n = text.length;
-  let i = 0;
-  while (i < n) {
-    const c = text[i];
-    if (state === 'NORMAL') {
-      if (c === "'") { state = 'SINGLE'; escapeString = opensEscapeString(i); chars[i] = ' '; i++; continue; }
-      if (c === '"') { state = 'DOUBLE'; chars[i] = ' '; i++; continue; }
-      if (c === '-' && text[i + 1] === '-') { state = 'LINE'; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
-      if (c === '/' && text[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
-      if (c === '$') {
-        const m = /^\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$/.exec(text.slice(i));
-        if (m) {
-          dollarTag = m[0];
-          state = 'DOLLAR';
-          for (let k = 0; k < m[0].length; k++) chars[i + k] = ' ';
-          i += m[0].length;
-          continue;
-        }
-      }
-      i++;
-      continue;
-    }
-    if (state === 'SINGLE') {
-      chars[i] = ' ';
-      if (escapeString && c === '\\\\') { chars[i + 1] = ' '; i += 2; continue; }
-      if (c === "'") {
-        if (text[i + 1] === "'") { chars[i + 1] = ' '; i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
-    if (state === 'DOUBLE') {
-      chars[i] = ' ';
-      if (c === '"') {
-        if (text[i + 1] === '"') { chars[i + 1] = ' '; i += 2; continue; }
-        state = 'NORMAL'; i++; continue;
-      }
-      i++; continue;
-    }
-    if (state === 'LINE') {
-      if (c === '\\n') { state = 'NORMAL'; i++; continue; }
-      chars[i] = ' '; i++; continue;
-    }
-    if (state === 'BLOCK') {
-      if (c === '/' && text[i + 1] === '*') { blockDepth++; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
-      if (c === '*' && text[i + 1] === '/') { blockDepth--; chars[i] = ' '; chars[i + 1] = ' '; i += 2; if (blockDepth === 0) state = 'NORMAL'; continue; }
-      chars[i] = ' '; i++; continue;
-    }
-    if (state === 'DOLLAR') {
-      if (text.startsWith(dollarTag, i)) {
-        for (let k = 0; k < dollarTag.length; k++) chars[i + k] = ' ';
-        state = 'NORMAL'; i += dollarTag.length; dollarTag = null; continue;
-      }
-      chars[i] = ' '; i++; continue;
-    }
-    i++;
+  for (const span of scanSql(text)) {
+    if (span.kind === 'code') continue;
+    for (let i = span.start; i < span.end; i++) chars[i] = ' ';
   }
   return chars.join('');
 }
@@ -2079,7 +2057,7 @@ function updateAutocompleteActive() {
 let paramsCache = { params: {}, errors: [] };
 // One pending save per connection: switching tabs mid-edit must not cancel the
 // save the connection we just left had queued.
-const paramsSaveTimers = new Map(); // connId -> timeout id
+const pendingParamSaves = new Map(); // connId -> { text, id: timeout id }
 const paramsSaveFailed = new Set(); // connIds whose last save did not land
 
 function parseParamsText(text) {
@@ -2163,19 +2141,24 @@ function seedParams(refs) {
   if (!activeConnId || !tabState.has(activeConnId)) return false;
   const state = tabState.get(activeConnId);
   if (!state.seeded) state.seeded = new Set();
+  const editor = document.getElementById('editor');
+  // A name still being typed ends right at the caret; seeding it would leave a
+  // line for every prefix (:i, :id) on the way to :ids.
+  const caret = document.activeElement === editor ? editor.selectionStart : -1;
   const added = [];
   for (const ref of refs) {
+    if (ref.end === caret) continue;
     if (Object.prototype.hasOwnProperty.call(paramsCache.params, ref.name)) continue;
     if (state.seeded.has(ref.name)) continue;
     state.seeded.add(ref.name);
     added.push(ref.name);
   }
   if (!added.length) return false;
-  const editor = document.getElementById('params-editor');
-  const existing = editor.value.replace(/\\n+$/, '');
+  const panel = document.getElementById('params-editor');
+  const existing = panel.value.replace(/\\n+$/, '');
   const lines = added.map((name) => name + ' = ');
-  editor.value = (existing ? existing + '\\n' : '') + lines.join('\\n') + '\\n';
-  paramsCache = parseParamsText(editor.value);
+  panel.value = (existing ? existing + '\\n' : '') + lines.join('\\n') + '\\n';
+  paramsCache = parseParamsText(panel.value);
   saveParamsSoon();
   return true;
 }
@@ -2303,6 +2286,7 @@ async function saveParams(connId, text) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ params: text }),
+      keepalive: true, // a save flushed from beforeunload has to survive the teardown
     });
     if (!res.ok) throw new Error(res.statusText);
     paramsSaveFailed.delete(connId);
@@ -2315,11 +2299,11 @@ async function saveParams(connId, text) {
 }
 
 function flushParamsSave(connId) {
-  const timer = paramsSaveTimers.get(connId);
-  if (!timer) return;
-  clearTimeout(timer.id);
-  paramsSaveTimers.delete(connId);
-  saveParams(connId, timer.text);
+  const pending = pendingParamSaves.get(connId);
+  if (!pending) return;
+  clearTimeout(pending.id);
+  pendingParamSaves.delete(connId);
+  saveParams(connId, pending.text);
 }
 
 function saveParamsSoon() {
@@ -2329,12 +2313,12 @@ function saveParamsSoon() {
   if (tabState.has(connId)) tabState.get(connId).params = text;
   const conn = connections.find((c) => c.id === connId);
   if (conn) conn.params = text;
-  const pending = paramsSaveTimers.get(connId);
+  const pending = pendingParamSaves.get(connId);
   if (pending) clearTimeout(pending.id);
-  paramsSaveTimers.set(connId, {
+  pendingParamSaves.set(connId, {
     text,
     id: setTimeout(() => {
-      paramsSaveTimers.delete(connId);
+      pendingParamSaves.delete(connId);
       saveParams(connId, text);
     }, 400),
   });
@@ -2395,7 +2379,7 @@ function initVerticalResize(editorId, handleId, key, minHeight, maxFraction) {
 
 window.addEventListener('resize', () => syncOverlays());
 window.addEventListener('beforeunload', () => {
-  for (const connId of [...paramsSaveTimers.keys()]) flushParamsSave(connId);
+  for (const connId of [...pendingParamSaves.keys()]) flushParamsSave(connId);
 });
 
 (function initParamsPanel() {
