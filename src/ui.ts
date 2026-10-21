@@ -474,6 +474,7 @@ function setTabStatus(connId, text) {
 async function runQuery(confirm, explain) {
   if (!activeConnId) return;
   hideAutocomplete();
+  refreshParams(true);
   const connId = activeConnId;
   const rawSql = document.getElementById('editor').value.trim();
   if (!rawSql) return;
@@ -1339,6 +1340,7 @@ document.addEventListener('copy', (e) => {
 
 async function exportCsv() {
   if (!activeConnId) return;
+  refreshParams(true);
   const sql = document.getElementById('editor').value.trim();
   if (!sql) return;
   const url = \`/api/connections/\${activeConnId}/export\`;
@@ -1624,7 +1626,11 @@ function scanSql(text) {
       if (c === '-' && text[i + 1] === '-') { close('code', i); state = 'LINE'; i += 2; continue; }
       if (c === '/' && text[i + 1] === '*') { close('code', i); state = 'BLOCK'; blockDepth = 1; i += 2; continue; }
       if (c === '$') {
-        const m = /^\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$/.exec(text.slice(i));
+        // A dollar sign is a legal identifier character in Postgres, so foo$tag$bar
+        // is one identifier, not a dollar-quoted block.
+        const before = text[i - 1];
+        const partOfIdent = before !== undefined && /[A-Za-z0-9_$]/.test(before);
+        const m = partOfIdent ? null : /^\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$/.exec(text.slice(i));
         if (m) { close('code', i); dollarTag = m[0]; state = 'DOLLAR'; i += m[0].length; continue; }
       }
       i++;
@@ -2137,14 +2143,15 @@ function updateParamsVisibility(refs) {
 // A :name typed in the editor declares the parameter: it gets its own line in the
 // panel, waiting for a value. A name is only seeded once per tab, so deleting the
 // line it added doesn't make it come straight back.
-function seedParams(refs) {
+function seedParams(refs, includeCaretWord) {
   if (!activeConnId || !tabState.has(activeConnId)) return false;
   const state = tabState.get(activeConnId);
   if (!state.seeded) state.seeded = new Set();
   const editor = document.getElementById('editor');
   // A name still being typed ends right at the caret; seeding it would leave a
-  // line for every prefix (:i, :id) on the way to :ids.
-  const caret = document.activeElement === editor ? editor.selectionStart : -1;
+  // line for every prefix (:i, :id) on the way to :ids. Running the query settles
+  // the matter, so that pass takes the name under the caret too.
+  const caret = !includeCaretWord && document.activeElement === editor ? editor.selectionStart : -1;
   const added = [];
   for (const ref of refs) {
     if (ref.end === caret) continue;
@@ -2256,10 +2263,10 @@ function updatePreview() {
   box.textContent = result.changed ? result.sql : '(no parameters substituted)';
 }
 
-function refreshParams() {
+function refreshParams(includeCaretWord) {
   paramsCache = parseParamsText(paramsText());
   let refs = findParamRefs(document.getElementById('editor').value);
-  if (seedParams(refs)) refs = findParamRefs(document.getElementById('editor').value);
+  if (seedParams(refs, includeCaretWord)) refs = findParamRefs(document.getElementById('editor').value);
   const missing = [];
   const unset = [];
   const referenced = new Set();
@@ -2280,13 +2287,15 @@ function refreshParams() {
   updatePreview();
 }
 
-async function saveParams(connId, text) {
+// keepalive is only for the beforeunload flush: it has a 64 KiB budget shared across
+// in-flight requests, which an ordinary save has no reason to spend.
+async function saveParams(connId, text, keepalive) {
   try {
     const res = await fetch(\`/api/connections/\${connId}/params\`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ params: text }),
-      keepalive: true, // a save flushed from beforeunload has to survive the teardown
+      keepalive: !!keepalive,
     });
     if (!res.ok) throw new Error(res.statusText);
     paramsSaveFailed.delete(connId);
@@ -2298,12 +2307,12 @@ async function saveParams(connId, text) {
   if (connId === activeConnId) refreshParams();
 }
 
-function flushParamsSave(connId) {
+function flushParamsSave(connId, keepalive) {
   const pending = pendingParamSaves.get(connId);
   if (!pending) return;
   clearTimeout(pending.id);
   pendingParamSaves.delete(connId);
-  saveParams(connId, pending.text);
+  saveParams(connId, pending.text, keepalive);
 }
 
 function saveParamsSoon() {
@@ -2379,7 +2388,7 @@ function initVerticalResize(editorId, handleId, key, minHeight, maxFraction) {
 
 window.addEventListener('resize', () => syncOverlays());
 window.addEventListener('beforeunload', () => {
-  for (const connId of [...pendingParamSaves.keys()]) flushParamsSave(connId);
+  for (const connId of [...pendingParamSaves.keys()]) flushParamsSave(connId, true);
 });
 
 (function initParamsPanel() {

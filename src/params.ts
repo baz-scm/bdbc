@@ -74,7 +74,11 @@ export function findParamRefs(sql: string): ParamRef[] {
       if (c === "-" && sql[i + 1] === "-") { state = "LINE"; i += 2; continue; }
       if (c === "/" && sql[i + 1] === "*") { state = "BLOCK"; blockDepth = 1; i += 2; continue; }
       if (c === "$") {
-        const m = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+        // `$` is a legal identifier character in Postgres, so foo$tag$bar is one
+        // identifier, not a dollar-quoted block.
+        const after = sql[i - 1];
+        const partOfIdent = after !== undefined && /[A-Za-z0-9_$]/.test(after);
+        const m = partOfIdent ? null : /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
         if (m) { dollarTag = m[0]; state = "DOLLAR"; i += m[0].length; continue; }
         i++;
         continue;
