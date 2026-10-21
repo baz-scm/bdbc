@@ -8,7 +8,19 @@ Lightweight Postgres web client. Single Bun binary, zero npm dependencies (uses 
 - `src/store.ts` — connections persisted to `~/.bdbc/connections.json` (0600/0700 perms), migrates from legacy `~/.dbclient/`
 - `src/db.ts` — query execution, table listing, destructive-statement detection
 - `src/csv.ts` — CSV export with headers
+- `src/params.ts` — query parameters: parses the `name = value` panel text and substitutes `:name` only in code positions
 - `src/ui.ts` — the entire frontend (HTML/CSS/JS) as one template literal string, served inline. No build step, no framework.
+
+## The SQL scanner exists twice
+
+`src/params.ts` (`findParamRefs`) and `src/ui.ts` (`scanSql`, which `maskNonSql`,
+`splitStatements` and the UI's `findParamRefs` are all built on) walk SQL with the same
+grammar: string literals, `E'...'` backslash escapes, dollar-quoted blocks with
+identifier-aware `$` handling, line and block comments, `::` casts. They are separate
+because the inline UI script cannot import from the server, so **a change to one needs
+the same change to the other**. Drift here has already shipped a bug once: a fix applied
+to two of the three scanners left the third splitting statements inside `E'...'`
+literals, which silently killed column autocomplete.
 
 ## Commands
 

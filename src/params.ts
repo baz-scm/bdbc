@@ -57,8 +57,10 @@ export function findParamRefs(sql: string): ParamRef[] {
   let escapeString = false;
   let state: "NORMAL" | "SINGLE" | "DOUBLE" | "LINE" | "BLOCK" | "DOLLAR" = "NORMAL";
 
-  // E'...' (and the U&'...' / e'...' spellings) take backslash escapes, so a \' in
-  // one of those is not the end of the literal.
+  // E'...' and e'...' take backslash escapes, so a backslashed quote in one of
+  // those is not the end of the literal. Plain and U&'...' literals are not
+  // affected: under standard_conforming_strings a backslash is an ordinary
+  // character there.
   const opensEscapeString = (idx: number) => {
     const prev = sql[idx - 1];
     if (prev !== "E" && prev !== "e") return false;
