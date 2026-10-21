@@ -2063,7 +2063,7 @@ function updateAutocompleteActive() {
 let paramsCache = { params: {}, errors: [] };
 // One pending save per connection: switching tabs mid-edit must not cancel the
 // save the connection we just left had queued.
-const pendingParamSaves = new Map(); // connId -> { text, id: timeout id }
+const pendingParamSaves = new Map(); // connId -> { text, token, id: timeout id }
 // The edit no response has confirmed yet, whether it is still waiting on the
 // debounce or already in flight. An ordinary PUT is not keepalive, so the unload
 // can abort it; this is what the unload handler resends. Each edit carries a token,
