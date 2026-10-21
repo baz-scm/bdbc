@@ -19,6 +19,7 @@ import {
   toQueryError,
 } from "./db";
 import { toCsv } from "./csv";
+import { parseParams, interpolate, missingParamsError } from "./params";
 import { html } from "./ui";
 import pkg from "../package.json";
 
@@ -77,8 +78,26 @@ function error(message: string, status = 400): Response {
   return json({ error: message }, { status });
 }
 
-function queryError(err: any, status = 400): Response {
-  return json({ error: toQueryError(err) }, { status });
+function queryError(err: any, status = 400, interpolatedSql?: string): Response {
+  return json({ error: { ...toQueryError(err), interpolatedSql } }, { status });
+}
+
+/**
+ * Resolves `:name` references against the params the client sent (falling back to
+ * the ones stored on the connection) before anything touches the SQL text.
+ */
+function resolveParams(
+  sql: string,
+  body: any,
+  conn: Connection,
+): { sql: string; interpolated: boolean } | { error: string } {
+  const text = typeof body.params === "string" ? body.params : conn.params;
+  const { params } = parseParams(text ?? "");
+  const result = interpolate(sql, params);
+  if (result.missing.length || result.unset.length) {
+    return { error: missingParamsError(result.missing, result.unset) };
+  }
+  return { sql: result.sql, interpolated: result.changed };
 }
 
 async function readJson(req: Request): Promise<any> {
@@ -99,6 +118,7 @@ function draftToConnection(body: any, existing?: Connection): Connection {
     user: body.user ?? existing?.user ?? "",
     password: body.password && body.password.length > 0 ? body.password : (existing?.password ?? ""),
     ssl: Boolean(body.ssl ?? existing?.ssl ?? false),
+    params: body.params ?? existing?.params ?? "",
   };
 }
 
@@ -130,6 +150,7 @@ Bun.serve({
           user: body.user,
           password: body.password ?? "",
           ssl: Boolean(body.ssl),
+          params: typeof body.params === "string" ? body.params : "",
         }),
       );
     }
@@ -159,6 +180,7 @@ Bun.serve({
           user: body.user,
           password: body.password,
           ssl: body.ssl,
+          params: typeof body.params === "string" ? body.params : undefined,
         });
         if (!updated) return error("Connection not found", 404);
         dropClient(id);
@@ -181,10 +203,21 @@ Bun.serve({
         }
       }
 
+      if (sub === "/params" && method === "PUT") {
+        const body = await readJson(req);
+        if (typeof body.params !== "string") return error("Missing params");
+        const updated = updateConnection(id, { params: body.params });
+        if (!updated) return error("Connection not found", 404);
+        return json({ ...parseParams(body.params) });
+      }
+
       if (sub === "/query" && method === "POST") {
         const body = await readJson(req);
-        const sql = String(body.sql ?? "").trim();
-        if (!sql) return error("Missing sql");
+        const raw = String(body.sql ?? "").trim();
+        if (!raw) return error("Missing sql");
+        const resolved = resolveParams(raw, body, conn);
+        if ("error" in resolved) return error(resolved.error);
+        const { sql, interpolated } = resolved;
         if (isDestructive(sql) && !body.confirm) {
           return json(
             { needsConfirm: true, reason: `This looks like a destructive statement:\n\n${sql}` },
@@ -194,9 +227,9 @@ Bun.serve({
         try {
           const result = await runQuery(conn, sql);
           const edit = await detectEditInfo(conn, sql, result.columns).catch(() => null);
-          return json({ ...result, edit });
+          return json({ ...result, edit, interpolatedSql: interpolated ? sql : undefined });
         } catch (err: any) {
-          return queryError(err);
+          return queryError(err, 400, interpolated ? sql : undefined);
         }
       }
 
@@ -244,10 +277,12 @@ Bun.serve({
 
       if (sub === "/export" && method === "POST") {
         const body = await readJson(req);
-        const sql = String(body.sql ?? "").trim();
-        if (!sql) return error("Missing sql");
+        const raw = String(body.sql ?? "").trim();
+        if (!raw) return error("Missing sql");
+        const resolved = resolveParams(raw, body, conn);
+        if ("error" in resolved) return error(resolved.error);
         try {
-          const result = await runQuery(conn, sql);
+          const result = await runQuery(conn, resolved.sql);
           const csv = toCsv(result.columns, result.rows);
           return new Response(csv, {
             headers: {
