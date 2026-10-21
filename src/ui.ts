@@ -273,6 +273,7 @@ function switchTab(connId) {
   if (activeConnId && tabState.has(activeConnId)) {
     tabState.get(activeConnId).sql = document.getElementById('editor').value;
     tabState.get(activeConnId).params = document.getElementById('params-editor').value;
+    flushParamsSave(activeConnId);
   }
   activeConnId = connId;
   const state = tabState.get(connId) || { sql: '', result: null, error: null, status: '', params: '' };
@@ -297,6 +298,7 @@ function switchTab(connId) {
 function closeTab(connId, e) {
   if (e) e.stopPropagation();
   if (!tabState.has(connId)) return;
+  flushParamsSave(connId);
   tabState.delete(connId);
   tabOrder = tabOrder.filter((id) => id !== connId);
   if (activeConnId === connId) {
@@ -536,7 +538,9 @@ function renderQueryError(err, editorSql) {
   resetResultsState();
   const wrap = document.getElementById('results-wrap');
   const rawOffset = err.position != null ? err.position - (err.explainOffset || 0) : undefined;
-  const interpolated = err.interpolatedSql || null;
+  // The interpolated SQL the server ran still carries any EXPLAIN prefix we added,
+  // and rawOffset is already relative to the text without it.
+  const interpolated = err.interpolatedSql ? err.interpolatedSql.slice(err.explainOffset || 0) : null;
   const loc = rawOffset != null ? computeLineCol(interpolated || editorSql, rawOffset) : null;
   const parts = [];
   parts.push(\`<div class="err-message">\${escapeHtml(err.message || 'Query failed')}</div>\`);
@@ -1660,17 +1664,25 @@ function maskNonSql(text) {
   let state = 'NORMAL';
   let dollarTag = null;
   let blockDepth = 0;
+  let escapeString = false;
+  // E'...' takes backslash escapes, so a backslashed quote inside one is not the end.
+  const opensEscapeString = (idx) => {
+    const prev = text[idx - 1];
+    if (prev !== 'E' && prev !== 'e') return false;
+    const before = text[idx - 2];
+    return before === undefined || !/[A-Za-z0-9_$]/.test(before);
+  };
   const n = text.length;
   let i = 0;
   while (i < n) {
     const c = text[i];
     if (state === 'NORMAL') {
-      if (c === "'") { state = 'SINGLE'; chars[i] = ' '; i++; continue; }
+      if (c === "'") { state = 'SINGLE'; escapeString = opensEscapeString(i); chars[i] = ' '; i++; continue; }
       if (c === '"') { state = 'DOUBLE'; chars[i] = ' '; i++; continue; }
       if (c === '-' && text[i + 1] === '-') { state = 'LINE'; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
       if (c === '/' && text[i + 1] === '*') { state = 'BLOCK'; blockDepth = 1; chars[i] = ' '; chars[i + 1] = ' '; i += 2; continue; }
       if (c === '$') {
-        const m = /^\\$[A-Za-z_]*\\$/.exec(text.slice(i));
+        const m = /^\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$/.exec(text.slice(i));
         if (m) {
           dollarTag = m[0];
           state = 'DOLLAR';
@@ -1684,6 +1696,7 @@ function maskNonSql(text) {
     }
     if (state === 'SINGLE') {
       chars[i] = ' ';
+      if (escapeString && c === '\\\\') { chars[i + 1] = ' '; i += 2; continue; }
       if (c === "'") {
         if (text[i + 1] === "'") { chars[i + 1] = ' '; i += 2; continue; }
         state = 'NORMAL'; i++; continue;
@@ -2064,7 +2077,10 @@ function updateAutocompleteActive() {
 // here is for feedback while typing.
 
 let paramsCache = { params: {}, errors: [] };
-let paramsSaveTimer = null;
+// One pending save per connection: switching tabs mid-edit must not cancel the
+// save the connection we just left had queued.
+const paramsSaveTimers = new Map(); // connId -> timeout id
+const paramsSaveFailed = new Set(); // connIds whose last save did not land
 
 function parseParamsText(text) {
   const params = {};
@@ -2186,6 +2202,7 @@ function renderParamsStatus(info) {
   }
   if (info.unset.length) bad.push('awaiting a value: ' + info.unset.map((m) => ':' + m).join(', '));
   if (info.missing.length) bad.push('undefined: ' + info.missing.map((m) => ':' + m).join(', '));
+  if (activeConnId && paramsSaveFailed.has(activeConnId)) bad.push('not saved — retrying on the next edit');
   el.classList.toggle('error', bad.length > 0);
   el.textContent = bits.concat(bad).join(' · ');
 }
@@ -2280,6 +2297,31 @@ function refreshParams() {
   updatePreview();
 }
 
+async function saveParams(connId, text) {
+  try {
+    const res = await fetch(\`/api/connections/\${connId}/params\`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ params: text }),
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    paramsSaveFailed.delete(connId);
+  } catch (err) {
+    // The edit only lives in memory until a save lands, so say so rather than
+    // letting it look persisted and vanish on reload.
+    paramsSaveFailed.add(connId);
+  }
+  if (connId === activeConnId) refreshParams();
+}
+
+function flushParamsSave(connId) {
+  const timer = paramsSaveTimers.get(connId);
+  if (!timer) return;
+  clearTimeout(timer.id);
+  paramsSaveTimers.delete(connId);
+  saveParams(connId, timer.text);
+}
+
 function saveParamsSoon() {
   const connId = activeConnId;
   if (!connId) return;
@@ -2287,14 +2329,15 @@ function saveParamsSoon() {
   if (tabState.has(connId)) tabState.get(connId).params = text;
   const conn = connections.find((c) => c.id === connId);
   if (conn) conn.params = text;
-  if (paramsSaveTimer) clearTimeout(paramsSaveTimer);
-  paramsSaveTimer = setTimeout(() => {
-    fetch(\`/api/connections/\${connId}/params\`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ params: text }),
-    }).catch(() => {});
-  }, 400);
+  const pending = paramsSaveTimers.get(connId);
+  if (pending) clearTimeout(pending.id);
+  paramsSaveTimers.set(connId, {
+    text,
+    id: setTimeout(() => {
+      paramsSaveTimers.delete(connId);
+      saveParams(connId, text);
+    }, 400),
+  });
 }
 
 document.getElementById('params-editor').addEventListener('input', () => {
@@ -2351,6 +2394,9 @@ function initVerticalResize(editorId, handleId, key, minHeight, maxFraction) {
 }
 
 window.addEventListener('resize', () => syncOverlays());
+window.addEventListener('beforeunload', () => {
+  for (const connId of [...paramsSaveTimers.keys()]) flushParamsSave(connId);
+});
 
 (function initParamsPanel() {
   initVerticalResize('editor', 'editor-resizer', 'bdbc.editorHeight', 60, 0.6);

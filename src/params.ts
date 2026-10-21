@@ -54,17 +54,27 @@ export function findParamRefs(sql: string): ParamRef[] {
   let i = 0;
   let dollarTag: string | null = null;
   let blockDepth = 0;
+  let escapeString = false;
   let state: "NORMAL" | "SINGLE" | "DOUBLE" | "LINE" | "BLOCK" | "DOLLAR" = "NORMAL";
+
+  // E'...' (and the U&'...' / e'...' spellings) take backslash escapes, so a \' in
+  // one of those is not the end of the literal.
+  const opensEscapeString = (idx: number) => {
+    const prev = sql[idx - 1];
+    if (prev !== "E" && prev !== "e") return false;
+    const before = sql[idx - 2];
+    return before === undefined || !/[A-Za-z0-9_$]/.test(before);
+  };
 
   while (i < n) {
     const c = sql[i];
     if (state === "NORMAL") {
-      if (c === "'") { state = "SINGLE"; i++; continue; }
+      if (c === "'") { state = "SINGLE"; escapeString = opensEscapeString(i); i++; continue; }
       if (c === '"') { state = "DOUBLE"; i++; continue; }
       if (c === "-" && sql[i + 1] === "-") { state = "LINE"; i += 2; continue; }
       if (c === "/" && sql[i + 1] === "*") { state = "BLOCK"; blockDepth = 1; i += 2; continue; }
       if (c === "$") {
-        const m = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
+        const m = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
         if (m) { dollarTag = m[0]; state = "DOLLAR"; i += m[0].length; continue; }
         i++;
         continue;
@@ -86,6 +96,7 @@ export function findParamRefs(sql: string): ParamRef[] {
     }
     if (state === "SINGLE" || state === "DOUBLE") {
       const q = state === "SINGLE" ? "'" : '"';
+      if (state === "SINGLE" && escapeString && c === "\\") { i += 2; continue; }
       if (c === q) {
         if (sql[i + 1] === q) { i += 2; continue; }
         state = "NORMAL";
