@@ -163,6 +163,7 @@ export const html = /* html */ `<!doctype html>
       <span id="active-conn-badge" class="conn-badge"></span>
       <button class="primary" id="run-btn" onclick="runQuery()">Run ▸</button>
       <button class="secondary" id="explain-btn" onclick="runQuery(false, true)">Explain</button>
+      <button class="secondary" id="cancel-btn" onclick="cancelRun()" style="display:none" title="Cancel the query running in this tab">Cancel</button>
       <button class="secondary" id="toggle-preview-btn" onclick="togglePreview()" title="Show the SQL that will actually run, with :params substituted">Preview</button>
       <button class="secondary" id="export-btn" onclick="exportCsv()">Export CSV</button>
       <button class="secondary" id="copy-csv-btn" onclick="copyCsv()">Copy CSV</button>
@@ -233,13 +234,13 @@ let activeConnId = null;
 const tablesCache = new Map();
 const expandedConns = new Set();
 const expandedSchemas = new Set();
-const tabState = new Map(); // connId -> { sql, result, error, status }
+const tabState = new Map(); // connId -> { sql, result, error, status, run }
 let tabOrder = [];
 
 function openTab(connId) {
   if (!tabState.has(connId)) {
     const conn = connections.find((c) => c.id === connId);
-    tabState.set(connId, { sql: '', result: null, error: null, status: '', params: (conn && conn.params) || '' });
+    tabState.set(connId, { sql: '', result: null, error: null, status: '', params: (conn && conn.params) || '', run: null });
     tabOrder.push(connId);
   }
   switchTab(connId);
@@ -290,6 +291,7 @@ function switchTab(connId) {
     document.getElementById('results-wrap').innerHTML = '<div class="empty-state">Run a query to see results.</div>';
   }
   hideAutocomplete();
+  updateRunControls();
   renderTabBar();
   renderActiveConnBadge();
   renderConnList();
@@ -298,6 +300,8 @@ function switchTab(connId) {
 function closeTab(connId, e) {
   if (e) e.stopPropagation();
   if (!tabState.has(connId)) return;
+  const closing = tabState.get(connId);
+  if (closing.run) cancelRun(connId);
   flushParamsSave(connId);
   tabState.delete(connId);
   tabOrder = tabOrder.filter((id) => id !== connId);
@@ -313,6 +317,7 @@ function closeTab(connId, e) {
       document.getElementById('status').textContent = '';
       resetResultsState();
       document.getElementById('results-wrap').innerHTML = '<div class="empty-state">Pick a connection to get started.</div>';
+      updateRunControls();
       renderTabBar();
       renderActiveConnBadge();
       renderConnList();
@@ -471,29 +476,88 @@ function setTabStatus(connId, text) {
   if (connId === activeConnId) document.getElementById('status').textContent = text;
 }
 
+// A tab runs at most one query at a time: the run holds an AbortController and a
+// server-side run id, and must be canceled (pg_cancel_backend) before another
+// query can start in that tab. Other tabs stay free to run their own queries.
+function updateRunControls() {
+  const state = activeConnId ? tabState.get(activeConnId) : null;
+  const run = state && state.run;
+  document.getElementById('run-btn').disabled = !activeConnId || !!run;
+  document.getElementById('explain-btn').disabled = !activeConnId || !!run;
+  const cancelBtn = document.getElementById('cancel-btn');
+  cancelBtn.style.display = run ? '' : 'none';
+  cancelBtn.disabled = !!(run && run.canceling);
+  cancelBtn.textContent = run && run.canceling ? 'Canceling…' : 'Cancel';
+}
+
+function flashStatus(connId, text) {
+  if (connId !== activeConnId) return;
+  const el = document.getElementById('status');
+  el.textContent = text;
+  setTimeout(() => {
+    const state = tabState.get(connId);
+    if (connId === activeConnId && el.textContent === text) el.textContent = (state && state.status) || '';
+  }, 2000);
+}
+
+async function cancelRun(connId) {
+  connId = connId || activeConnId;
+  const state = tabState.get(connId);
+  if (!state || !state.run || state.run.canceling) return;
+  const run = state.run;
+  run.canceling = true;
+  updateRunControls();
+  setTabStatus(connId, 'Canceling…');
+  let acked = false;
+  try {
+    const res = await fetch(\`/api/connections/\${connId}/cancel\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: run.id }),
+    });
+    acked = res.ok && (await res.json()).canceled;
+  } catch (err) {
+    // fall through to the client-side abort below
+  }
+  // The server only knows the backend pid once the statement is on the wire;
+  // if it could not cancel, drop the request locally so the tab is usable again.
+  if (!acked && !run.done) run.controller.abort();
+}
+
 async function runQuery(confirm, explain) {
   if (!activeConnId) return;
   hideAutocomplete();
   refreshParams(true);
   const connId = activeConnId;
+  const state = tabState.get(connId);
+  if (state && state.run) {
+    flashStatus(connId, 'Query already running — cancel it first.');
+    return;
+  }
   const rawSql = document.getElementById('editor').value.trim();
   if (!rawSql) return;
   const wasPrefixed = explain && !/^\\s*explain\\b/i.test(rawSql);
   const sql = wasPrefixed ? 'EXPLAIN ' + rawSql : rawSql;
   const explainOffset = wasPrefixed ? 'EXPLAIN '.length : 0;
-  const runBtn = document.getElementById('run-btn');
-  runBtn.disabled = true;
+  const run = { id: newRunId(), controller: new AbortController(), canceling: false, done: false };
+  if (state) state.run = run;
+  updateRunControls();
   setTabStatus(connId, explain ? 'Explaining…' : 'Running…');
   try {
     const res = await fetch(\`/api/connections/\${connId}/query\`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, confirm: !!confirm, params: paramsText() }),
+      body: JSON.stringify({ sql, confirm: !!confirm, params: paramsText(), runId: run.id }),
+      signal: run.controller.signal,
     });
     const body = await res.json();
     if (res.status === 409 && body.needsConfirm) {
       openConfirmModal(body.reason, () => runQuery(true, explain));
       setTabStatus(connId, '');
+      return;
+    }
+    if (res.status === 499 || body.canceled) {
+      setTabStatus(connId, 'Canceled');
       return;
     }
     if (!res.ok) {
@@ -507,6 +571,10 @@ async function runQuery(confirm, explain) {
     if (connId === activeConnId) renderResults(body);
     setTabStatus(connId, \`\${body.rows.length} row(s)\`);
   } catch (err) {
+    if (err && err.name === 'AbortError') {
+      setTabStatus(connId, 'Canceled');
+      return;
+    }
     const errObj = err && typeof err === 'object' && 'message' in err ? err : { message: String(err && err.message ? err.message : err) };
     if (tabState.has(connId)) {
       tabState.get(connId).result = null;
@@ -515,8 +583,16 @@ async function runQuery(confirm, explain) {
     if (connId === activeConnId) renderQueryError(errObj, rawSql);
     setTabStatus(connId, '');
   } finally {
-    runBtn.disabled = false;
+    run.done = true;
+    const current = tabState.get(connId);
+    if (current && current.run === run) current.run = null;
+    updateRunControls();
   }
+}
+
+function newRunId() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return String(Date.now()) + '-' + Math.random().toString(36).slice(2);
 }
 
 function computeLineCol(sql, position) {
@@ -2450,6 +2526,7 @@ document.getElementById('editor').addEventListener('blur', hideAutocomplete);
   });
 })();
 
+updateRunControls();
 loadConnections();
 </script>
 </body>

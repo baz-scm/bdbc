@@ -17,6 +17,8 @@ import {
   insertRow,
   deleteRow,
   toQueryError,
+  cancelQuery,
+  isCanceled,
 } from "./db";
 import { toCsv } from "./csv";
 import { parseParams, interpolate, missingParamsError } from "./params";
@@ -224,12 +226,25 @@ Bun.serve({
             { status: 409 },
           );
         }
+        const runId = typeof body.runId === "string" && body.runId ? body.runId : undefined;
         try {
-          const result = await runQuery(conn, sql);
+          const result = await runQuery(conn, sql, runId);
           const edit = await detectEditInfo(conn, sql, result.columns).catch(() => null);
           return json({ ...result, edit, interpolatedSql: interpolated ? sql : undefined });
         } catch (err: any) {
+          if (isCanceled(err)) return json({ canceled: true }, { status: 499 });
           return queryError(err, 400, interpolated ? sql : undefined);
+        }
+      }
+
+      if (sub === "/cancel" && method === "POST") {
+        const body = await readJson(req);
+        const runId = String(body.runId ?? "");
+        if (!runId) return error("Missing runId");
+        try {
+          return json({ canceled: await cancelQuery(conn, runId) });
+        } catch (err: any) {
+          return error(err?.message ?? String(err), 502);
         }
       }
 

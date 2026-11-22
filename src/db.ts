@@ -105,9 +105,49 @@ function toResult(res: any): QueryResult {
   };
 }
 
-export async function runQuery(conn: Connection, text: string): Promise<QueryResult> {
-  const res = await withReconnect(conn, (client) => client.unsafe(text));
+/**
+ * Backend pids of queries still in flight, keyed by the client-supplied run id.
+ * A run is only cancelable while it holds a reserved connection, so the pid is
+ * registered right before the statement is issued and dropped as soon as it
+ * settles.
+ */
+const runningQueries = new Map<string, { connId: string; pid: number }>();
+
+export async function runQuery(conn: Connection, text: string, runId?: string): Promise<QueryResult> {
+  if (!runId) {
+    const res = await withReconnect(conn, (client) => client.unsafe(text));
+    return toResult(res);
+  }
+  const res = await withReconnect(conn, async (client) => {
+    const reserved = await client.reserve();
+    try {
+      const pidRows = (await reserved`select pg_backend_pid() as pid`) as any[];
+      runningQueries.set(runId, { connId: conn.id, pid: Number(pidRows[0]?.pid) });
+      try {
+        return await reserved.unsafe(text);
+      } finally {
+        runningQueries.delete(runId);
+      }
+    } finally {
+      reserved.release();
+    }
+  });
   return toResult(res);
+}
+
+export function isCanceled(err: any): boolean {
+  return err?.errno === "57014" || err?.code === "57014" || /canceling statement due to user request/i.test(err?.message ?? "");
+}
+
+/**
+ * Cancels an in-flight run from a second connection (pg_cancel_backend), which
+ * is the only way to interrupt a statement already sent on the reserved one.
+ */
+export async function cancelQuery(conn: Connection, runId: string): Promise<boolean> {
+  const handle = runningQueries.get(runId);
+  if (!handle || handle.connId !== conn.id || !handle.pid) return false;
+  await withReconnect(conn, (client) => client`select pg_cancel_backend(${handle.pid})`);
+  return true;
 }
 
 export interface TableInfo {
